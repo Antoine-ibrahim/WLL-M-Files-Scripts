@@ -1,0 +1,253 @@
+'''GOAL: THIS SCRIPT TRIGGERS FOR THE "DIVISION ORDER TRANSFER OR PAYCODE CHANGE REQUEST" CLASS. IT WILL UPDATE UPDATE SPECIFIC METADATA
+''' FROM THE db BY USING THE JIB OR REV NUMBER
+'''
+'''CREATED BY : ANTOINE IBRAHIM
+'''VERSION : 1.1: Updated the SQL query to account for both string and int IDs. Resolved issue with missing lookup values.
+'''LAST MODIFIED: 10/1/2021
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+' GET THE DEF ID'S FOR ALL THE PROPERTIES OF INTEREST ON THE CURRENT METADTA CARD 
+Dim ChangeType_Defid : ChangeType_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.ChangeType")
+Dim DeckType_Defid : DeckType_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("PD.DeckType")
+Dim ReverseRebook_Defid : ReverseRebook_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("PD.ManualDeckRr")
+Dim JibNum_Defid : JibNum_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("PD.JibDeckNumber")
+Dim RevNum_Defid : RevNum_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("PD.REVDeckNumber")
+Dim DateChangeOccurred_DefID : DateChangeOccurred_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.DateChangeOccurred")
+Dim BOLOWPCID_Defid : BOLOWPCID_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.BOLOWPCID.single")
+Dim WellName_Defid : WellName_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("PD.BOLOWellRevjib")
+Dim EffectiveDatejib_Defid : EffectiveDatejib_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("PD.EffectiveDateJib")
+Dim EffectiveDateRev_Defid : EffectiveDateRev_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("PD.EffectiveDateRev")
+Dim ExplanationJib_Defid : ExplanationJib_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("PD.ExplanationJib")
+Dim ExplanationRev_DefID : ExplanationRev_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("PD.ExplanationRev")
+Dim BoloWPCIDVL_DefID : BoloWPCIDVL_DefID = Vault.ValueListOperations.GetValueListIDByAlias("VL.BoloWPCID")
+	
+' GET THE DEF ID'S FOR THE CLASSES OF INTEREST (DIVISION ORDER TRANS OR PC REQUEST)
+Dim DOWF_Class_DefID : DOWF_Class_DefID = Vault.ClassOperations.GetObjectClassIDByAlias( "Class.DivisionOrderTransferOrPaycodeChangeRequest" )
+Const Class_DefID = 100
+Const DB_CONNECT_STRING = "Provider=SQLOLEDB.1;Password={password};Persist Security Info=True;User ID={username};Initial Catalog=M-Files;Data Source={server IP}"
+Const JibViewName = "[app].[vJibDecks]"
+Const revViewName = "[app].[vRevDecks]"
+Const Jibkey = "[BDECK_U2_ID]"
+Const revkey = "[DIV_U2_ID]"
+Const JibOrder = "[BDECK_SESSIONS_ID]"
+Const revOrder = "[DIV_SESSIONS_ID]"
+Dim QueryType : QueryType = ""
+
+'default vaules
+Dim ChangeType_Val : ChangeType_Val = ""
+Dim DeckType_Val : DeckType_Val = ""
+Dim ReverseRebook_Val : ReverseRebook_Val = ""
+Dim JibNum_Val : JibNum_Val = ""
+Dim RevNum_Val : RevNum_Val = ""
+Dim DateChangeOccurred_Val : DateChangeOccurred_Val = ""
+Dim BOLOWPCID_Val : BOLOWPCID_Val = ""
+Dim WellName_Val : WellName_Val = ""
+Dim EffectiveDatejib_Val : EffectiveDatejib_Val = ""
+Dim EffectiveDateRev_Val : EffectiveDateRev_Val = ""
+Dim ExplanationJib_Val : ExplanationJib_Val = ""
+Dim ExplanationRev_Val : ExplanationRev_Val = ""
+Dim JibNumChanged : JibNumChanged = true
+Dim RevNumChanged : RevNumChanged = true	
+
+' Get the properties of the object.
+dim PropertyVals : set PropertyVals = Vault.ObjectPropertyOperations.GetProperties( ObjVer, false )
+
+Dim CurrentClass_DefID : CurrentClass_DefID =Vault.ObjectPropertyOperations.GetProperty( ObjVer, Class_DefID ).Value.GetLookupID()
+
+' IF THE CLASS OF THE CURRENT OBJECT BEING CHECKDED IS "DIVISION ORDER TRANS OR PC REQUEST" CONTINUE WITH FUNCTIONALITY 
+If (CurrentClass_DefID = DOWF_Class_DefID ) Then
+	Dim ObjectVersions : Set ObjectVersions = Vault.ObjectOperations.GetHistory(ObjVer.ObjID)
+	' Otherwise if there is more than one version only process if previous version had an empty spud date.
+	If ObjectVersions.Count > 1 Then
+		' get the revnum and jib num from the last version to compare
+		Dim LastVersionObjVer : set LastVersionObjVer = ObjectVersions.Item(2).ObjVer
+		Dim LastVer_PropertyVals : set LastVer_PropertyVals = Vault.ObjectPropertyOperations.GetProperties( LastVersionObjVer, false ) 
+		If (PropertyVals.IndexOf(JibNum_Defid) > -1 AND LastVer_PropertyVals.IndexOf(JibNum_Defid) > -1) Then
+			If (PropertyVals.SearchForProperty(JibNum_Defid).Value.DisplayValue = LastVer_PropertyVals.SearchForProperty(JibNum_Defid).Value.DisplayValue) Then
+				JibNumChanged = false
+			End if
+		End If
+		If (PropertyVals.IndexOf(RevNum_Defid) > -1 AND LastVer_PropertyVals.IndexOf(RevNum_Defid) > -1) Then
+			If (PropertyVals.SearchForProperty(RevNum_Defid).Value.DisplayValue = LastVer_PropertyVals.SearchForProperty(RevNum_Defid).Value.DisplayValue) Then
+				RevNumChanged = false
+			End if
+		End If
+	End If
+	
+	' IF AUTHORIZATION NUMBER HAS A VALUE, GET THE REST OF THE PROPERTIES VALUES USING THE BOLO OWNER NUMBER
+	IF (PropertyVals.IndexOf(ChangeType_Defid) > -1 and PropertyVals.IndexOf(DeckType_Defid) >-1 and (JibNumChanged = true OR RevNumChanged= true))Then
+		ChangeType_Val = PropertyVals.SearchForProperty(ChangeType_Defid).Value.DisplayValue
+		
+		'Get THE VALUE FOR ALL THE PROPERTIES FROM THE DB
+		IF ChangeType_Val = "3. Whiting Interest Change" OR ChangeType_Val = "4. Non-Whiting Interest Change" OR ChangeType_Val = "5. Component Change" OR ChangeType_Val = "6. Payout Change" OR ChangeType_Val = "7. New Deck Request" Then 
+			IF PropertyVals.IndexOf(DeckType_Defid) > -1 and PropertyVals.IndexOf(ReverseRebook_Defid) > -1 Then
+				DeckType_Val = PropertyVals.SearchForProperty(DeckType_Defid).Value.DisplayValue
+				ReverseRebook_Val = PropertyVals.SearchForProperty(ReverseRebook_Defid).Value.DisplayValue
+				
+				IF ((DeckType_Val = "JIB" OR (DeckType_Val = "JIB and REV" and ReverseRebook_Val ="Yes" )) and PropertyVals.IndexOf(JibNum_Defid) > -1)  Then
+					
+					' get jib info					
+					JibNum_Val = PropertyVals.SearchForProperty(JibNum_Defid).Value.DisplayValue
+					GetDataFromDB "JIB", JibViewName, Jibkey, JibOrder, JibNum_Val
+					If (JibNumChanged = true) Then
+						IF ReverseRebook_Val ="Yes" Then
+							updatePropertyValue EffectiveDatejib_Defid, EffectiveDatejib_Val
+							updatePropertyValue ExplanationJib_Defid, ExplanationJib_Val
+						else 
+							updatePropertyValue EffectiveDatejib_Defid, ""
+							updatePropertyValue ExplanationJib_Defid, ""
+						End If
+					End If
+				End if
+				
+				IF ((DeckType_Val = "REV" OR DeckType_Val = "JIB and REV" ) and PropertyVals.IndexOf(RevNum_Defid) > -1) Then
+					' get Rev info
+					RevNum_Val = PropertyVals.SearchForProperty(RevNum_Defid).Value.DisplayValue
+					GetDataFromDB "REV", revViewName, revkey, revOrder, RevNum_Val
+					If (RevNumChanged= true ) Then
+						IF ReverseRebook_Val ="Yes" Then
+							updatePropertyValue EffectiveDateRev_Defid, EffectiveDateRev_Val
+							updatePropertyValue ExplanationRev_DefID, ExplanationRev_Val
+						else
+							updatePropertyValue EffectiveDateRev_Defid, ""
+							updatePropertyValue ExplanationRev_DefID, ""
+						End If
+					End If	
+				End if				
+				
+				IF NOT (DeckType_Val = "JIB and REV" and JibNumChanged = true and RevNumChanged= false) Then
+					updatePropertyValue DateChangeOccurred_DefID, DateChangeOccurred_Val				
+					updatePropertyValue WellName_Defid, WellName_Val
+					
+					IF BOLOWPCID_Val <> "" Then
+						Dim WPCID : WPCID = SearchForVLItemByValue (BoloWPCIDVL_DefID, BOLOWPCID_Val)
+						updatePropertyValue BOLOWPCID_Defid, WPCID
+					End IF
+					'Err.Raise MFScriptCancel, "Date change id:" &DateChangeOccurred_DefID& "value:" & DateChangeOccurred_Val &"well id:" &WellName_Defid& "value:" & WellName_Val
+				End IF
+			End if 
+		End if 
+	End IF
+
+
+	'MAKE SURE THE MODIFIED BY USER, IS THE CURRENT USER 
+	Const ModifiedBy = 23
+	Dim lastModifiedVal : Set lastModifiedVal = CreateObject("MFilesAPI.TypedValue")
+	lastModifiedVal.Value = Now
+	Dim SetModifiedToCurrentUser : set SetModifiedToCurrentUser =Vault.ObjectPropertyOperations.SetLastModificationInfoAdmin (ObjVer, True, PropertyVals.SearchForProperty(ModifiedBy).Value , True, lastModifiedVal)
+End If
+
+
+'============================================='
+'============= HELPER FUNCTIONS =============='
+'============================================='
+
+public function GetDataFromDB(QueryType, ViewName, JibRevKey, JibRevOrder, JibRevValue )
+'	
+	Dim SQL : SQL = "SELECT TOP 1 CAST([CHANGE_DATES] as date) [CHANGE_DATES],[SHADOW_KEY] as [WPCID],[NAME] as [WellName],CAST([EFF_DATES] as date) [EFF_DATES],[EXPLANATIONS] "  & _						
+						" from "& ViewName  & _	
+						" WHERE " & JibRevKey & " = '" & JibRevValue &"'" & _
+						" and [CHANGE_DATES] is not null " & _
+						" order by " & JibRevOrder & " desc"						
+			
+	Dim myConn : Set myConn = CreateObject("ADODB.Connection")
+	DIM RS : SET RS = CreateObject("ADODB.recordset") 'new
+	dim PropertyVals : set PropertyVals = Vault.ObjectPropertyOperations.GetProperties( ObjVer, false )
+	
+	on error resume next
+	
+	myConn.Open DB_CONNECT_STRING
+	RS.Open SQL,myConn 
+
+	' if there is an error , close the RS and DB COnnection , and set them to null 
+	If Err.Number <> 0 Then
+		SessionDescVal = "rs state= "& RS.State & " DB State:" & myConn.State
+		If RS.State = 1 Then
+	        RS.Close
+			SET RS = Nothing
+			SessionDescVal = SessionDescVal & "Closing RS"
+		End If
+		If myConn.State = 1 Then
+	        myConn.Close
+			SET myConn = Nothing
+			SessionDescVal = SessionDescVal & ",Closing DB COnn"
+		End If
+		SessionDescVal = SessionDescVal & " err num" & Err.Number & " Desc: "& Err.Description
+		Err.Clear
+	else 	
+		If NOT RS.EOF  Then 
+			DateChangeOccurred_Val = RS("CHANGE_DATES")
+			BOLOWPCID_Val = RS("WPCID")
+			WellName_Val = RS("WellName")
+			
+			If QueryType ="JIB" Then 
+				EffectiveDatejib_Val = RS("EFF_DATES")
+				ExplanationJib_Val = RS("EXPLANATIONS")
+			End if 
+			
+			If QueryType ="REV" Then 
+				EffectiveDateRev_Val = RS("EFF_DATES")
+				ExplanationRev_Val = RS("EXPLANATIONS")
+			End if 
+		end if 
+	End if 	
+
+	If RS.State = 1 Then
+        RS.Close
+		SET RS = Nothing
+	End If
+	If myConn.State = 1 Then
+        myConn.Close
+		SET myConn = Nothing
+	End If
+End Function
+
+' THIS FUNCTION IS USED TO SET ANY DATE OR TEXT FIELD,
+' IF A DATE OR TEXT IS PROVIDED AS THE PROPVALUE, IT CHECKS THAT THE FIELD EXISTS AND IF IT DOES IT UPDATES THE VALUE
+
+public function updatePropertyValue( PropDefID, propValue)
+	IF PropertyVals.IndexOf(PropDefID) > -1  Then
+			dim PropertyToChange : set PropertyToChange = PropertyVals.SearchForProperty(PropDefID)
+			
+			if (PropertyToChange.Value.DataType = MFDatatypeDate and (propValue= "1/1/1900"  or propValue= ""  )) then
+				PropertyToChange.Value.SetValue PropertyToChange.Value.DataType, null
+			ElseIf(PropertyToChange.Value.DataType = MFDatatypeLookup) then
+				if ( propValue = "-1" or propValue = "") then					
+					PropertyToChange.Value.SetValueToNULL(MFDataType.MFDatatypeLookup)
+				else					
+					PropertyToChange.Value.SetValue MFDatatypeLookup, propValue
+				end if 
+			else  
+				PropertyToChange.Value.SetValue PropertyToChange.Value.DataType, propValue
+			End if
+			Vault.ObjectPropertyOperations.SetProperty ObjVer, PropertyToChange
+	End IF 	
+End Function
+
+Function SearchForVLItemByValue(ValueList_DefID, ItemValue)
+	Dim  VLItemID : VLItemID = -1
+	
+	'search condition for the text value we are looking for 
+	Dim oSearchConditions : Set oSearchConditions = CreateObject("MFilesAPI.SearchConditions")
+	Dim oVLItemSearchCondition : Set oVLItemSearchCondition = CreateObject("MFilesAPI.SearchCondition")
+	oVLItemSearchCondition.Expression.SetValueListItemExpression MFValueListItemPropertyDefName,MFParentChildBehaviorNone, Nothing
+	oVLItemSearchCondition.ConditionType = MFConditionTypeEqual 
+	oVLItemSearchCondition.TypedValue.SetValue MFDatatypeText, ItemValue
+
+	oSearchConditions.Add -1, oVLItemSearchCondition 
+
+	'get only non deleted items
+	Dim NotDeletedCondition : Set NotDeletedCondition = CreateObject("MFilesAPI.SearchCondition")
+	NotDeletedCondition.Expression.SetValueListItemExpression MFValueListItemPropertyDefDeleted, MFParentChildBehaviorNone, Nothing
+	NotDeletedCondition.ConditionType = MFConditionTypeEqual
+	NotDeletedCondition.TypedValue.SetValue MFDatatypeBoolean, false	
+	oSearchConditions.Add -1, NotDeletedCondition
+	
+
+	Dim Results : set Results = vault.ValueListItemOperations.SearchForValueListItemsEx(ValueList_DefID, oSearchConditions)
+	If Results.Count >0 Then 
+		VLItemID = Results(1).ID
+	End If
+
+	SearchForVLItemByValue = VLItemID
+End Function

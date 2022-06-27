@@ -1,0 +1,189 @@
+'''GOAL: THIS SCRIPT TRIGGERS FOR THE "DIVISION ORDER TRANSFER OR PAYCODE CHANGE REQUEST" CLASS. IT WILL UPDATE THE NAME OR TITLE FIELD AS WELL AS 
+''' UPDATE OTHER METADATA FROM A VIEW
+'''
+'''CREATED BY : ANTOINE IBRAHIM
+'''VERSION 1.1: Updated the script to trigger for only PCC or TRF, and added short WF name value. 
+'''LAST MODIFIED: 11/4/2021
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+' GET THE DEF ID'S FOR ALL THE PROPERTIES OF INTEREST ON THE CURRENT METADTA CARD 
+Dim ChangeType_Defid : ChangeType_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.ChangeType")
+Dim BOLOAuthorizationNumber_DefID : BOLOAuthorizationNumber_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.BOLOAuthorizationNumber")
+Dim FromBoloOwnerNumber_Defid : FromBoloOwnerNumber_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.FromBOLONumber")
+Dim FromBoloOwnerName_Defid : FromBoloOwnerName_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.FromBOLOName")
+Dim BOLOWPCID_Defid : BOLOWPCID_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.BOLOWPCID.single")
+Dim DateChangeOccurred_DefID : DateChangeOccurred_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.DateChangeOccurred")
+Dim EffectiveDate_Defid : EffectiveDate_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.BOLOEffectiveDate")
+Dim SessionDesc_Defid : SessionDesc_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.SessionDescription")
+Dim Remarks_DefID : Remarks_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.Remarks")
+
+' GET THE DEF ID'S FOR THE CLASSES OF INTEREST (DIVISION ORDER TRANS OR PC REQUEST)
+Dim DOWF_Class_DefID : DOWF_Class_DefID = Vault.ClassOperations.GetObjectClassIDByAlias( "Class.DivisionOrderTransferOrPaycodeChangeRequest" )
+Const Class_DefID = 100
+Const ViewName = "[M-Files].land.vOwnerChange"
+Const DB_CONNECT_STRING = "Provider=SQLOLEDB.1;Password={password};Persist Security Info=True;User ID={username};Initial Catalog=M-Files;Data Source={source}"
+
+'default vaules
+Dim ChangeTypeVal : ChangeTypeVal =""
+Dim BOLOWPCIDVal : BOLOWPCIDVal =""
+Dim newNameorTitle : newNameorTitle = ""
+Dim AuthorizationNumberVal : AuthorizationNumberVal =""
+Dim DateChangeOccurredVal : DateChangeOccurredVal =""
+Dim EffectiveDateVal : EffectiveDateVal =""
+Dim BoloOwnerNumberVal : BoloOwnerNumberVal =""
+Dim BoloOwnerNameVal : BoloOwnerNameVal=""
+Dim SessionDescVal : SessionDescVal =""
+Dim RemarksVal : RemarksVal =""
+Dim isNameEmpty : isNameEmpty = true 
+
+' Get the properties of the object.
+dim PropertyVals : set PropertyVals = Vault.ObjectPropertyOperations.GetProperties( ObjVer, false )
+
+IF PropertyVals.IndexOf(BOLOWPCID_Defid) > -1 Then
+	BOLOWPCIDVal = 	PropertyVals.SearchForProperty(BOLOWPCID_Defid).Value.DisplayValue 
+End IF
+
+Dim CurrentClass_DefID : CurrentClass_DefID =Vault.ObjectPropertyOperations.GetProperty( ObjVer, Class_DefID ).Value.GetLookupID()
+' IF THE CLASS OF THE CURRENT OBJECT BEING CHECKDED IS "DIVISION ORDER TRANS OR PC REQUEST" CONTINUE WITH FUNCTIONALITY 
+If (CurrentClass_DefID = DOWF_Class_DefID ) Then
+	
+	IF PropertyVals.IndexOf(ChangeType_Defid) > -1 Then
+		ChangeTypeVal = PropertyVals.SearchForProperty(ChangeType_Defid).Value.DisplayValue 
+		
+		If (ChangeTypeVal = "1. Paycode Change" OR ChangeTypeVal = "2. Transfer of Interest" ) Then
+
+		' IF AUTHORIZATION NUMBER HAS A VALUE, GET THE REST OF THE PROPERTIES VALUES USING THE BOLO OWNER NUMBER
+			IF PropertyVals.IndexOf(BOLOAuthorizationNumber_DefID) > -1 Then
+				AuthorizationNumberVal = PropertyVals.SearchForProperty(BOLOAuthorizationNumber_DefID).Value.DisplayValue
+				'Get THE VALUE FOR ALL THE PROPERTIES FROM THE DB
+				IF AuthorizationNumberVal <> "" Then 
+					GetDataFromDB					
+					updatePropertyValue DateChangeOccurred_DefID, DateChangeOccurredVal						
+					updatePropertyValue EffectiveDate_Defid, EffectiveDateVal					
+					updatePropertyValue FromBoloOwnerNumber_Defid, BoloOwnerNumberVal
+					updatePropertyValue FromBoloOwnerName_Defid, BoloOwnerNameVal
+					updatePropertyValue SessionDesc_Defid, SessionDescVal
+					updatePropertyValue Remarks_DefID, RemarksVal
+				End if 
+			End IF
+
+			'[ChangeType]_[BOLOAuthorizationNumber]_[From BOLO Owner Name (limit to 50VARCHAR)]_[From BOLO Owner Number]_[BOLOWPCID]
+			newNameorTitle = GetValtoAppend(GetWorkflowAbreviation(ChangeTypeVal),-1) + GetValtoAppend(AuthorizationNumberVal,-1)+ GetValtoAppend(BoloOwnerNameVal,50) + GetValtoAppend(BoloOwnerNumberVal,-1)+GetValtoAppend(BOLOWPCIDVal,-1)
+
+			' IF THE NAME OR TITLE PROPERTY IS ON THE METADATA CARD, THEN PROCEDE AND UPDATE THE NAME OR TITLE FIELD WITH THE VALUE 
+			IF PropertyVals.IndexOf(0) > -1 Then
+				dim NameOrTitleProp : set NameOrTitleProp = PropertyVals.SearchForProperty(0)			'
+				NameOrTitleProp.Value.SetValue MFDatatypeText, newNameorTitle
+				Vault.ObjectPropertyOperations.SetProperty ObjVer, NameOrTitleProp
+			End IF 		
+
+			'MAKE SURE THE MODIFIED BY USER, IS THE CURRENT USER 
+			Const ModifiedBy = 23
+			Dim lastModifiedVal : Set lastModifiedVal = CreateObject("MFilesAPI.TypedValue")
+			lastModifiedVal.Value = Now
+			Dim SetModifiedToCurrentUser : set SetModifiedToCurrentUser =Vault.ObjectPropertyOperations.SetLastModificationInfoAdmin (ObjVer, True, PropertyVals.SearchForProperty(ModifiedBy).Value , True, lastModifiedVal)
+		End If
+	End If
+End If
+
+
+'============================================='
+'============= HELPER FUNCTIONS =============='
+'============================================='
+
+public function GetDataFromDB()
+	Dim SQL : SQL = "SELECT top 1 authorizationNumber as [EffectiveDate], "  & _
+						"isnull(convert(varchar(10),[EffectiveDate],101),'') as [EffectiveDate], "  & _
+						"isnull(convert(varchar(10),[DateChangesOccurred],101),'') as [DateChangesOccurred], "  & _
+						"isnull([fromOwnerNumber],'') as [fromOwnerNumber],  "  & _
+						"isnull([FromOwnerName],'') as [FromOwnerName],  "  & _
+						"isnull([SessionDescription],'') as [SessionDescription],  "  & _
+						"isnull([document],'') as [document]  "  & _
+						"from "& ViewName & " where authorizationNumber = '" & AuthorizationNumberVal &"'"
+	Dim myConn : Set myConn = CreateObject("ADODB.Connection")
+	DIM RS : SET RS = CreateObject("ADODB.recordset") 'new
+	dim PropertyVals : set PropertyVals = Vault.ObjectPropertyOperations.GetProperties( ObjVer, false )
+	
+	'added on error resume next for error handling 
+	on error resume next
+
+	' open the connection
+	myConn.Open DB_CONNECT_STRING
+	RS.Open SQL,myConn
+	
+	' if there is no error , get the values from the db 
+	If Err.Number = 0 Then	
+		If NOT RS.EOF  Then 
+			DateChangeOccurredVal = RS("DateChangesOccurred")
+			EffectiveDateVal = RS("EffectiveDate")
+			BoloOwnerNumberVal = RS("fromOwnerNumber")
+			BoloOwnerNameVal = RS("FromOwnerName")
+			SessionDescVal = RS("SessionDescription")
+			RemarksVal = RS("document")
+		end if 
+	End if 	
+	
+	'Due to putting on error resume next, this line always gets executed even if db
+	'connection fails, it will close the RS and myConn objects if their state =1, (meaning the connection is open)
+	If RS.State = 1 Then
+        RS.Close
+		SET RS = Nothing
+	End If
+	If myConn.State = 1 Then
+        myConn.Close
+		SET myConn = Nothing
+	End If
+End Function
+
+' THIS FUNCTION IS USED TO SET ANY DATE OR TEXT FIELD,
+' IF A DATE OR TEXT IS PROVIDED AS THE PROPVALUE, IT CHECKS THAT THE FIELD EXISTS AND IF IT DOES IT UPDATES THE VALUE
+
+public function updatePropertyValue( PropDefID, propValue)
+	IF PropertyVals.IndexOf(PropDefID) > -1  Then
+			dim PropertyToChange : set PropertyToChange = PropertyVals.SearchForProperty(PropDefID)
+			
+			if (PropertyToChange.Value.DataType = MFDatatypeDate and (propValue= "1/1/1900"  or propValue= ""  )) then
+				PropertyToChange.Value.SetValue PropertyToChange.Value.DataType, null
+			else  
+				'Err.Raise MFScriptCancel, PropertyToChange.Value.DataType &" value " & propValue
+				PropertyToChange.Value.SetValue PropertyToChange.Value.DataType, propValue
+			End if
+			Vault.ObjectPropertyOperations.SetProperty ObjVer, PropertyToChange
+	End IF 	
+End Function
+
+' THIS FUNCTION TAKES IN A value AND A LENGTH AND RETURNS VALUE THAT NEEDS TO BE APPENDED TO THE NAME OR TITLE FIELD 
+public Function GetValtoAppend(valueOfProp , length)
+	Dim ValueToAppend : ValueToAppend =  ""
+		IF valueOfProp <> "" Then 
+			if (length > 1 ) then 
+				If isNameEmpty = false Then
+					ValueToAppend = "_"+ Mid(valueOfProp, 1, length)
+				Else
+					ValueToAppend = Mid(valueOfProp, 1, length)
+				End If
+			else 
+				If isNameEmpty = false Then
+					ValueToAppend = "_"+ valueOfProp
+				Else
+					ValueToAppend = valueOfProp
+				End If
+			end if 
+			isNameEmpty= false
+		End if	
+	GetValtoAppend = ValueToAppend
+End Function
+
+Function GetWorkflowAbreviation (WfType)
+	Dim WF_Abreviations : Set WF_Abreviations = CreateObject("Scripting.Dictionary")
+	WF_Abreviations.CompareMode = vbTextCompare
+	
+	Dim abbreviation : abbreviation =WfType
+	WF_Abreviations.Add "1. Paycode Change", "PCC"
+	WF_Abreviations.Add "2. Transfer of Interest", "TRF"
+	
+	if WF_Abreviations.Exists(WfType) Then
+		abbreviation = WF_Abreviations.Item(WfType)
+	End If
+	GetWorkflowAbreviation = abbreviation
+End Function

@@ -1,0 +1,179 @@
+'''GOAL: THIS SCRIPT TRIGGERS ON THE SUGGESTIONS CONFIRMED STATE OF THE RC AUTOMATION WORKFLOW. THE PURPOSE OF THIS SCRIPT IS TO UPDATE THE REPORTING CHECKLIST
+''' OBJECT TO REFLECT ALL WORKFLOWS THAT ARE NOT APPLICABLE TO THE CURRENT WELL. THIS SCRIPT WILL UPDATE THE STATE AND STATUS OF THE WORKFLOW TO DISPLAY AS "N/A"
+'''
+'''CREATED BY : ANTOINE IBRAHIM
+'''VERSION : 1.0
+'''LAST MODIFIED: 12/03/2019
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+'SET THE DEF ID'S FOR PROPERTIES OF INTEREST
+Dim SubmittalType_DefID : SubmittalType_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.SubmittalType")
+Dim WFMulti_DefID : WFMulti_DefID =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.ChooseWorkflowMulti")
+Dim SingleWell_Defid : SingleWell_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.Well.Single")
+Dim WFVL_DefId : WFVL_DefId = Vault.ValueListOperations.GetValueListIDByAlias("VL.RCWorkflow")
+Dim Checklist_Class_DefID : Checklist_Class_DefID = Vault.ClassOperations.GetObjectClassIDByAlias("Class.WF.DB.Checklist")
+
+Dim NonApplicableWFs : Set NonApplicableWFs = CreateObject("Scripting.Dictionary")
+'GET THE PROPERTY VALUES FOR THE CURRENT VERSION 
+Dim PropertyVals : set PropertyVals = Vault.ObjectPropertyOperations.GetProperties( ObjVer, false ) 
+
+If (WFVL_DefId > -1 and SubmittalType_DefID > -1  and WFMulti_DefID >-1 and SingleWell_Defid >-1) then 
+	'if there submittal type and well properties have a value then process
+	If( PropertyVals.SearchForProperty(SubmittalType_DefID).Value.DisplayValue <> "" and PropertyVals.SearchForProperty(SingleWell_Defid).Value.DisplayValue <> "" and PropertyVals.SearchForProperty(WFMulti_DefID).Value.DisplayValue <> "") Then
+		' get the value of the submittal type and selected well
+		Dim Submittal_Lookup : Submittal_Lookup = PropertyVals.SearchForProperty(SubmittalType_DefID).Value.GetLookupID()
+		Dim SelectedWell_LookupID : SelectedWell_LookupID = PropertyVals.SearchForProperty(SingleWell_Defid).TypedValue.GetLookUpId()
+		
+		'search for all items in the choose WF vales list that have the selected submittal type as its Parent
+		SearchForVLItemsWithParent WFVL_DefId,Submittal_Lookup
+	
+		Dim selectedWfs : set selectedWfs = PropertyVals.SearchForProperty(WFMulti_DefID).Value.GetValueAsLookups()
+	
+		'updates the list of WF that are not applicable by removing all items that are selected on the metadata card.
+		for each Wf in selectedWfs
+			if (NonApplicableWFs.Exists(Wf.Item)  ) then
+				NonApplicableWFs.Remove(Wf.Item)
+			End If
+		next
+	
+		'update checklist
+		updateChecklist SelectedWell_LookupID
+	End if
+End if
+
+
+'============================================='
+'============= HELPER FUNCTIONS =============='
+'============================================='
+''' this function takes in a value of the "Coose WF multi" value list, and the id of the owner, and it conducts a search to retrieve all the 
+''' items in the value list that have the specified owner. It then adds all the result items to an array list.
+
+Function SearchForVLItemsWithParent(ValueList_DefID, OwnerLookup)
+
+	'search condition for the owner of the lookup we are searching for
+	Dim oSearchConditions : Set oSearchConditions = CreateObject("MFilesAPI.SearchConditions")
+	Dim oOwnerSearchCondition : Set oOwnerSearchCondition = CreateObject("MFilesAPI.SearchCondition")
+	oOwnerSearchCondition.Expression.SetValueListItemExpression MFValueListItemPropertyDefOwner,MFParentChildBehaviorNone, Nothing
+	oOwnerSearchCondition.ConditionType = MFConditionTypeEqual 
+	oOwnerSearchCondition.TypedValue.SetValue MFDatatypeLookup, OwnerLookup
+	oSearchConditions.Add -1, oOwnerSearchCondition 
+
+	'get only non deleted items
+	Dim NotDeletedCondition : Set NotDeletedCondition = CreateObject("MFilesAPI.SearchCondition")
+	NotDeletedCondition.Expression.SetValueListItemExpression MFValueListItemPropertyDefDeleted, MFParentChildBehaviorNone, Nothing
+	NotDeletedCondition.ConditionType = MFConditionTypeEqual
+	NotDeletedCondition.TypedValue.SetValue MFDatatypeBoolean, false	
+	oSearchConditions.Add -1, NotDeletedCondition
+
+	Dim Results : set Results = vault.ValueListItemOperations.SearchForValueListItemsEx(ValueList_DefID, oSearchConditions)
+	
+	for each wfItem in Results
+		NonApplicableWFs.Add wfItem.ID, wfItem.Name
+	Next
+
+End Function
+
+'CREATES A SEARCH CONDITION FOR A LOOKUP WITH A SPECIFIC LOOKUP ID 
+public Function GetSearchConditionForLookupByID(PropertyDefID, lookupInternalId)
+	
+	' Create a lookup referencing this class ID.
+	Dim oLookup : Set oLookup = CreateObject("MFilesAPI.Lookup")
+	oLookup.Item = lookupInternalId
+
+	' Define the search condition.'
+	Dim oSearchCondition : Set oSearchCondition = CreateObject("MFilesAPI.SearchCondition")
+	oSearchCondition.Expression.SetPropertyValueExpression PropertyDefID, MFParentChildBehaviorNone, Nothing
+	oSearchCondition.ConditionType = 1
+	'oSearchCondition.TypedValue = oPropertyValue
+	oSearchCondition.TypedValue.SetValueToLookup(oLookup)
+
+	' Return the search condition.'
+	Set GetSearchConditionForLookupByID = oSearchCondition
+End Function
+
+'' this function conducts a search for the the checklists that have the selected well. It then retrieves the search for the first checklist and updates the
+'' values of the the status and state properties for every workflow that is in the non applicable WF list.
+Function updateChecklist (well_LookupId)
+	IF Checklist_Class_DefID <> -1 THEN 
+		'CREATE A SEARCH CONDITION FOR THE CHECKLIST CLASS, AND SELECTED WELL 		
+		Dim oSearchConditions : Set oSearchConditions = CreateObject("MFilesAPI.SearchConditions")
+		Dim oClassSearchCondition : Set oClassSearchCondition = GetSearchConditionForLookupByID(100, Checklist_Class_DefID)
+		Dim oWellSearchCondition : Set oWellSearchCondition = GetSearchConditionForLookupByID(SingleWell_Defid, well_LookupId)
+		
+		oSearchConditions.Add -1, oClassSearchCondition
+		oSearchConditions.Add -1, oWellSearchCondition
+		
+		' RUN THE SEARCH.
+		Dim oSearchResults : set oSearchResults = Vault.ObjectSearchOperations.SearchForObjectsByConditions(oSearchConditions, 0, false)
+		'Err.raise MFScriptCancel, oSearchResults.Count 
+		
+		' if the search results results then find the State of the Field that was found
+		If oSearchResults.Count > 0 Then
+			'get the metadata properties for that search result
+			Dim oResult : Set oResult =  Vault.ObjectOperations.GetObjectVersionAndProperties(oSearchResults(1).ObjVer, false)
+			
+			'CHECKOUT THE CHECKLIST OBJECT OF INTEREST
+			Dim checkedOutObjectVersion : Set checkedOutObjectVersion = vault.ObjectOperations.CheckOut(oSearchResults(1).ObjVer.objID)
+
+			for each WF_value in NonApplicableWFs.Items
+				Dim wf_specific_statusAlias : wf_specific_statusAlias =strClean("Property.RC.Checklist."&WF_value&"Status")
+				Dim wf_specific_stateAlias : wf_specific_stateAlias =strClean("Property.RC.Checklist."&WF_value&"State")
+
+				If (Vault.PropertyDefOperations.GetPropertyDefIDByAlias(wf_specific_statusAlias) > -1)Then
+					vault.ObjectPropertyOperations.SetProperty checkedOutObjectVersion.ObjVer, CreatePropertyValueByAlias(wf_specific_statusAlias, "MFDatatypeText", "N/A")
+				End If 
+
+				If (Vault.PropertyDefOperations.GetPropertyDefIDByAlias(wf_specific_stateAlias) > -1)Then
+					vault.ObjectPropertyOperations.SetProperty checkedOutObjectVersion.ObjVer, CreatePropertyValueByAlias(wf_specific_stateAlias, "MFDatatypeText", "N/A")
+				End If 
+			Next
+
+			vault.ObjectOperations.CheckIn checkedOutObjectVersion.ObjVer
+		End If
+	End If
+End Function
+
+' THIS FUNCTION TAKES IN A STRING AND RIPS OUT ALL CHARACTERS THAT ARE NOT (a-z, A-Z, OR ".") AND RETURNS THE REMAINING STRING
+'IT IS USED TO ASSIST IN CREATING THE ALIAS FOR THE ITEM PROPERTIES THAT NEEDS TO BE UPDATED 
+Function strClean (strtoclean)
+	Dim objRegExp, outputStr
+	Set objRegExp = New Regexp
+	
+	objRegExp.IgnoreCase = True
+	objRegExp.Global = True
+	'objRegExp.Pattern = "((?![a-zA-Z0-9]).)+"
+	objRegExp.Pattern = "((?![a-zA-Z.]).)+"
+	outputStr = objRegExp.Replace(strtoclean, "")
+	
+	objRegExp.Pattern = "\-+"
+	outputStr = objRegExp.Replace(outputStr, "")
+	
+	strClean = outputStr
+End Function
+
+'CREATES A PROPERTY VALUE OBJECT AND SETS ITS VALUE, USED TO CREATE THE PROPERTIES THAT NEED TO BE UPDATED
+'IN THE CHECKLIST, WILL ONLY HOP IN HERE AFTER VALIDATING PROPERTY EXISTS
+public Function CreatePropertyValueByAlias(propertyAlias, propDataType, oPropertyValue)
+'	GET THE PROPERTY THAT NEEDS TO BE UPDATED
+	Dim PropertyDefID : PropertyDefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias(propertyAlias)
+	Dim oPropertyValueCondition : Set oPropertyValueCondition = CreateObject("MFilesAPI.PropertyValue")
+		oPropertyValueCondition.PropertyDef = PropertyDefID
+		if (propDataType ="MFDatatypeDate") then 
+			if (oPropertyValue ="") then 
+				oPropertyValueCondition.Value.SetValue MFDatatypeDate, Null
+			else
+				oPropertyValueCondition.Value.SetValue MFDatatypeDate, oPropertyValue
+			end if
+		end if 
+		
+		if (propDataType ="MFDatatypeText") then 
+			if (oPropertyValue ="") then 
+				oPropertyValueCondition.Value.SetValue MFDatatypeText, Null
+			else
+				oPropertyValueCondition.Value.SetValue MFDatatypeText, oPropertyValue
+			end if
+		end if 
+		
+	' Return the propertyValue condition.'
+	Set CreatePropertyValueByAlias = oPropertyValueCondition 
+End Function

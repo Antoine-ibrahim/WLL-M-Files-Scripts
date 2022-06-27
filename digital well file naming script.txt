@@ -1,0 +1,107 @@
+'''GOAL: THIS CODE IS MEANT TO RETAIN THE ORIGINAL FILE NAME, TO ALLOW USERS TO KNOW WHICH DOCUMENT THEY ARE CURRENTLY EDITING
+''' (USERS DRAG AND DROP 50+ DOCUMENTS TO ADD TO VAULT AT A TIME). AFTER THE USER KEYS IN ALL THE METADATA, AND CLICKES CREATE, 
+'''IF THIS DOCUMENT IS FOR THE CORRECT CLASS, THIS CODE WILL TRIGGER AND CONCATENATE THE NEW NAME OF THE DOC, AND REPLACE THE NAME OR TITLE FIELD 
+'''
+'''NAMING CONVENTION :[WellNm] (39) +'_'+ [DocCat](4) +'_'+ [DocType] (15)+'_'+ [DocDt] (10) +'_'+ [SpDocID]
+'''
+'''THIS CODE TRIGGERS WHEN AN RC PROCESS CLASS IS CHECKED IN, IT RETRIEVES THE FOLLOWING PROPERTIES
+'''(WELL NME, DOC CATEGORY, DOC TYPE, SP DOC ID, AND NAME OR TITLE) AND USES THEM TO CONCATENATE THE NAME OR TITLE 
+'''IT WILL THEN TAKE THE VALUE ALREADY IN THE NAME OR TITLE FIELD (THE FILE NAME) AND STORE IT IN A PROPERTY CALLED 
+''' ORIGINAL FILE NAME, AND REPLACE THE VALUE IN THE NAME OR TITLE FIELD WITH THE CREATED NAME 
+'''
+'''CREATED BY : ANTOINE IBRAHIM
+'''VERSION : 1.0
+'''LAST MODIFIED: 10/13/2018
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+
+
+' GET THE DEF ID'S FOR ALL THE PROPERTIES OF INTEREST ON THE CURRENT METADTA CARD 
+Dim WellName_Defid : WellName_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.Well.Single")
+Dim DocCategory_Defid : DocCategory_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.Category-DWF")
+Dim DocType_DefID : DocType_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.Type-DWF")
+Dim DocDate_DefID : DocDate_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.DocumentDate")
+Dim SpDocumentID_DefID : SpDocumentID_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.SPDocumentID")
+Dim OriginalFileName_DefID : OriginalFileName_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.OriginalFileName")
+
+' GET THE DEF ID'S FOR THE CLASSES OF INTEREST (DIGITAL WELL FILES)
+Dim RCProcess_Class_DefID : RCProcess_Class_DefID = Vault.ClassOperations.GetObjectClassIDByAlias( "Class.WF.RCProcess" )
+Const Class_DefID = 100
+
+Dim DwfDocumentName : DwfDocumentName = ""
+
+' IF THE CLASS OF THE CURRENT OBJECT BEING CHECKDED IN RC PROCESS THEN CONTINUE WITH FUNCTIONALITY 
+If Vault.ObjectPropertyOperations.GetProperty( ObjVer, Class_DefID ).Value.GetLookupID() = RCProcess_Class_DefID Then
+	' Get the properties of the object.
+	Dim PropertyVals : set PropertyVals = Vault.ObjectPropertyOperations.GetProperties( ObjVer, false )
+	
+	'Create the Digital well file name by concatenating the properties if they exist.
+	IF PropertyVals.IndexOf(WellName_Defid) > -1 Then
+		IF PropertyVals.SearchForProperty(WellName_Defid).Value.DisplayValue <> "" Then 
+			DwfDocumentName = Mid(PropertyVals.SearchForProperty(WellName_Defid).Value.DisplayValue, 1, 39)
+		End if 
+	End IF 	
+	
+	IF PropertyVals.IndexOf(DocCategory_Defid) > -1 Then
+		IF PropertyVals.SearchForProperty(DocCategory_Defid).Value.DisplayValue <> "" Then 
+			If DwfDocumentName <> "" Then
+				DwfDocumentName =DwfDocumentName +"_"+ Mid(PropertyVals.SearchForProperty(DocCategory_Defid).Value.DisplayValue, 1, 4)
+			Else
+				DwfDocumentName = Mid(PropertyVals.SearchForProperty(DocCategory_Defid).Value.DisplayValue, 1, 4)
+			End If
+		End if 
+	End IF 	
+	
+	IF PropertyVals.IndexOf(DocType_DefID) > -1 Then
+		IF PropertyVals.SearchForProperty(DocType_DefID).Value.DisplayValue <> "" Then 
+			If DwfDocumentName <> "" Then
+				DwfDocumentName =DwfDocumentName +"_"+ Mid(PropertyVals.SearchForProperty(DocType_DefID).Value.DisplayValue, 1, 15)
+			Else
+				DwfDocumentName = Mid(PropertyVals.SearchForProperty(DocType_DefID).Value.DisplayValue, 1, 15)
+			End If
+		End if 
+	End IF 	
+	
+	IF PropertyVals.IndexOf(DocDate_DefID) > -1 Then
+		IF PropertyVals.SearchForProperty(DocDate_DefID).Value.DisplayValue <> "" Then 
+			If DwfDocumentName <> "" Then
+				DwfDocumentName =DwfDocumentName +"_"+ Replace(PropertyVals.SearchForProperty(DocDate_DefID).Value.DisplayValue,"/","-")
+			Else
+				DwfDocumentName = Replace(PropertyVals.SearchForProperty(DocDate_DefID).Value.DisplayValue,"/","-")
+			End If
+		End if 
+	End IF 	
+	
+	
+	IF PropertyVals.IndexOf(SpDocumentID_DefID) > -1 Then
+		IF PropertyVals.SearchForProperty(SpDocumentID_DefID).Value.DisplayValue <> "" Then 
+			If DwfDocumentName <> "" Then
+				DwfDocumentName =DwfDocumentName +"_"+ PropertyVals.SearchForProperty(SpDocumentID_DefID).Value.DisplayValue 
+			Else
+				DwfDocumentName = PropertyVals.SearchForProperty(SpDocumentID_DefID).Value.DisplayValue 
+			End If
+		End if 
+	End IF 	
+	
+	
+	Dim NameOrTitleIndex : NameOrTitleIndex = PropertyVals.IndexOf(0)
+	Dim OriginalFileNameIndex : OriginalFileNameIndex = PropertyVals.IndexOf(OriginalFileName_DefID)
+		
+	
+	' replace the name or title, with the conceatenated name , and replace the Original File Name filed with its value. 
+	Dim NameOrTitle : NameOrTitle = "" 
+	
+	IF NameOrTitleIndex > -1 Then
+		NameOrTitle= PropertyVals.SearchForProperty(0).Value.DisplayValue
+		Dim NameOrTitleProp : set NameOrTitleProp = PropertyVals( NameOrTitleIndex )
+	
+		IF OriginalFileNameIndex > -1 Then
+			Dim OriginalFileNameProp : set OriginalFileNameProp = PropertyVals( OriginalFileNameIndex )
+			OriginalFileNameProp.Value.SetValue MFDatatypeText, NameOrTitle
+			Vault.ObjectPropertyOperations.SetProperty ObjVer, OriginalFileNameProp
+		End IF 	
+	
+		NameOrTitleProp.Value.SetValue MFDatatypeText, DwfDocumentName
+		Vault.ObjectPropertyOperations.SetProperty ObjVer, NameOrTitleProp
+	End IF 	
+End IF 	

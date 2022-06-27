@@ -1,0 +1,247 @@
+'''GOAL: THIS CODE IS USED TO REFORMAT THE TEXT INSIDE THE LEGAL DESCRIPTION FIELD, WHITING HAS A REQUIREMENT THAT 
+''' THE VALUE OF THIS MULTIVALUE FIELD HAS THE FOLLOWING FORMAT (T123N-R123W-S123), HOWEVER USERS ENTER INFORMATION IN THIS FIELD 
+''' IN MANY DIFFERENT FORMATS. THIS CODE PARSES THROUGH WHAT THE USER ENTERS AND MAKES SURE THAT IT IS A VALID FORMAT, AND TRIES TO 
+''' REFORMAT IT IF IT IS NOT IN THE CORRECT FORMAT
+'''
+'''CREATED BY : ANTOINE IBRAHIM
+'''VERSION : 1.3
+''' v1.1 update: Added an integer cast to the section range comparison, fixed issue returning 11>6  = false 
+''' v1.2 update: Set the output string for legal description to display in all caps. Requested by Amelia. 
+''' v1.3 update: Added script provided by zachary wick (Mfiles) to keep modified by user.
+'''LAST MODIFIED: 09/04/2019
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+'Get defids for classes and properties we are interested in (missive properties)
+Const Class_DefID =100
+Dim LandFiles_Class_DefID : LandFiles_Class_DefID = Vault.ClassOperations.GetObjectClassIDByAlias( "Class.Document.LandFiles" )
+Dim LegalDesc_DefID : LegalDesc_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.Legal-Descriptions")
+
+Dim CurrentClass_DefID : CurrentClass_DefID = Vault.ObjectPropertyOperations.GetProperty( ObjVer, Class_DefID ).Value.GetLookupID()
+
+Dim Out : Out = ""
+
+If (CurrentClass_DefID = LandFiles_Class_DefID ) Then '1
+	Dim PropertyVals : set PropertyVals = Vault.ObjectPropertyOperations.GetProperties( ObjVer, false ) 
+	dim LegalDescIndex : LegalDescIndex = PropertyVals.IndexOf(LegalDesc_DefID)
+	if (LegalDescIndex > -1) Then
+		Dim LegalDesc_val : LegalDesc_val = PropertyVals.SearchForProperty(LegalDesc_DefID).Value.DisplayValue
+		
+		LegalDesc_val = replace(replace(replace(LegalDesc_val,vbCr+vbLf,";"),vbCr, "C"),vbLf, "L")
+		
+		'GET A LIST OF ALL THE LEGAL DESCRIPTIONS ENTERED IN THE MULTI VALUE TEXT FIELD
+		Dim LegalDescList : LegalDescList = Split(LegalDesc_val,";")
+	
+		' CREATE A REGEX EXPRESION THAT CAN BE USED TO VALIDATE THE VALUE IN THE FIELD
+		Set LegalExpression = New RegExp
+		  With LegalExpression
+		      '.Pattern    = "^\d{3}\-\d{3}\-\d{4}$"
+			  .Pattern    = "[Tt][\d]{1,5}[NnSs][-][Rr][\d]{1,5}[WwEe][-][sS][\d]{1,5}$"
+		      .IgnoreCase = False
+		      .Global     = False
+		  End With
+	
+		' FOR EVERY LEGAL DESCRIPTION FOUND, EITHER TRY TO REFORMAT IT OR OUTPUTS ITS VALUE UNCHANGED
+		For each Desc in LegalDescList
+			if (Trim(Desc)<> "") Then 
+			 	If (Out = "") Then
+					Out = ParsedDesc(UCase(Desc))				
+				Else 
+					Out = Out + vbCrLf + ParsedDesc(UCase(Desc))
+				End if 
+			End If
+		next
+		
+		' AFTER THE TEXT HAS BEEN REFORMATTED, IT SETS THE VALUE FOR THE PROPERTY 
+		dim PropertyToChange : set PropertyToChange = PropertyVals( LegalDescIndex )
+		PropertyToChange.Value.SetValue PropertyToChange.Value.DataType, Out
+		Vault.ObjectPropertyOperations.SetProperty ObjVer, PropertyToChange
+	End if	
+
+	'MAKE SURE THE MODIFIED BY USER, US THE CURRENT USER 
+	Const ModifiedBy = 23
+	Dim lastModifiedVal : Set lastModifiedVal = CreateObject("MFilesAPI.TypedValue")
+	lastModifiedVal.Value = Now
+	Dim SetModifiedToCurrentUser : set SetModifiedToCurrentUser =Vault.ObjectPropertyOperations.SetLastModificationInfoAdmin (ObjVer, True, PropertyVals.SearchForProperty(ModifiedBy).Value , True, lastModifiedVal)
+	'Err.Raise MFScriptCancel,  Out  'LegalDesc_val
+End If
+
+
+'============================================='
+'============= HELPER FUNCTIONS =============='
+'============================================='
+
+
+' THIS FUNCTION TAKES IN A LEGAL DESCRIPTION AND VALIDATES THE VALUE AND TRIES TO REFORMAT IT IF IT CAN 
+' IF IT IS UNABLE TO PARSE OR MANIPULATE THE TEXT TO THE CORRECT FORMAT, IT WILL RETURN THE ORIGINAL VALUE 
+' 
+
+									   
+Public Function ParsedDesc(ByVal description)
+  Dim StrToReturn : StrToReturn = ""
+  Dim valid : valid = true
+  Dim CurChar : CurChar = "" ' current character
+  Dim Town : Town = ""
+  Dim TownFound : TownFound = false
+
+  Dim Range : Range =""
+  Dim RangeFound : TownFound = false
+
+  Dim Section : Section = ""
+  DIm HasRangedSection : HasRangedSection = false 
+  Dim firstSecRange : firstSecRange =""
+  Dim SecArrayList : Set SecArrayList = CreateObject("System.Collections.ArrayList")
+  Dim placeholder : placeholder = ""
+
+	' If eveything looks good then just return the same legal description 
+  If LegalExpression.Test( description ) Then
+	StrToReturn =description
+  Else
+  	' If it does not look good then lets go character by character and try to figure it out
+	For i=1 To Len(description)
+		CurChar = Mid(description,i,1) ' get the character at index i 
+		' try to find Town 
+		 if (TownFound = false ) then
+			if (Asc(CurChar)>47 and Asc(CurChar)< 58) then ' if its between 0-9 
+				Town = Town +CurChar ' combine numbers till T is found 
+			elseif (CurChar= "N" or CurChar= "n" or CurChar= "S" or CurChar= "s"  ) then ' thats the end of town mark as 
+				Town = Town + CurChar
+				TownFound= true
+			else
+				if (CurChar <> "T" and CurChar <> "t" and Trim(CurChar) <> "" ) then 
+					StrToReturn = description
+					valid = false
+					Exit For
+				end if 
+			end if
+		 elseif (RangeFound= false) then		
+			if (Asc(CurChar)>47 and Asc(CurChar)< 58) then ' if its between 0-9 
+				Range = Range+ CurChar ' combine numbers till T is found 
+			elseif (CurChar= "E" or CurChar= "e" or CurChar= "W" or CurChar= "w"  ) then ' thats the end of town mark as 
+				Range = Range+ CurChar
+				RangeFound= true	
+			else
+				if ( Range <>"" and Trim(CurChar)<> "" ) then 
+					StrToReturn = description
+					valid = false
+					Exit For
+				end if 
+			end if
+		 else 
+			'section can have a range or alternate 
+			if (Asc(CurChar)>47 and Asc(CurChar)< 58) then ' if its between 0-9 
+				Section = Section+ CurChar ' combine numbers till T is found 
+				if (i = len(description))then 
+					if (HasRangedSection = true) then
+						if (IsNumeric(Section) and IsNumeric(firstSecRange) ) Then 
+							if (CInt(Section) > CInt(firstSecRange))Then
+								Dim k_index : k_index = Section - firstSecRange
+								For k=0 To k_index
+									SecArrayList.Add(Cstr(firstSecRange +k))
+								Next
+							Else
+								StrToReturn = description
+								valid = false
+								Exit For
+							End If
+						else 
+							valid = false
+						End If 
+					else
+						SecArrayList.Add(Section)
+					End if 
+				end if 
+			' if found one of the supported special characters
+			elseif (CurChar ="-" or CurChar ="&" or CurChar ="," )  then ' thats the end of town mark as 
+				if (Section <> "") then
+					If(HasRangedSection = false) then 
+						If (CurChar = "&" or CurChar=",") Then
+							SecArrayList.Add(Section)
+							Section = ""
+						elseif (CurChar= "-") Then
+							if (i = len(description))then 
+								valid = false
+								Exit For
+							elseif(firstSecRange = "")Then 
+								firstSecRange = Section
+								HasRangedSection = true
+								Section= "" 
+							else 
+								StrToReturn = description
+								valid = false
+								Exit For
+							end if
+							' cound be range, lets check
+						else 
+							 placeholder = ""
+						End if
+					else 
+						 If(CurChar = "&" or CurChar=",")Then
+							if (IsNumeric(Section) and IsNumeric(firstSecRange)) Then 
+								if (CInt(Section) > CInt(firstSecRange))Then
+									Dim index : index = Section - firstSecRange
+									For j=0 To index
+										SecArrayList.Add(Cstr(firstSecRange +j))
+									Next
+									HasRangedSection = false
+									Section= ""
+									firstSecRange =""	
+								else 
+									StrToReturn = description
+									valid = false
+									Exit For
+								End If
+							else 
+								'Err.Raise MFScriptCancel, CurChar
+								StrToReturn = description
+								valid = false
+								Exit For
+							End If 
+						elseif (CurChar= "-") Then
+							'Err.Raise MFScriptCancel, CurChar
+							StrToReturn = description
+							valid = false
+							Exit For
+						End IF
+
+					end if
+				End if
+			' If found an unsuported character 	
+			else 
+				If (CurChar <> "S" and Trim(CurChar)<> "" ) Then
+					StrToReturn = description
+					valid = false
+					Exit For
+				End If
+			end if
+		 End If
+	Next 
+	
+	if SecArrayList.Count = 0 then 
+		valid = false
+	end if 
+
+
+     For each item in SecArrayList
+	' Err.Raise MFScriptCancel,  description +" T" +Town+"-R"+Range +"-S"+Section
+	 	Dim formatedStr : formatedStr =  "T"+Town+"-R"+Range+"-S"+item 
+        if LegalExpression.Test( formatedStr ) Then
+			if (StrToReturn ="") Then
+				StrToReturn = formatedStr
+			else
+				StrToReturn = StrToReturn+ vbCrLf + formatedStr
+			End If 
+		Else
+			StrToReturn = description
+			valid = false
+			Exit For
+		End If
+
+     Next
+
+  End If
+  If (valid = false) then
+	StrToReturn = description
+  End if 
+
+  ParsedDesc = StrToReturn
+End Function

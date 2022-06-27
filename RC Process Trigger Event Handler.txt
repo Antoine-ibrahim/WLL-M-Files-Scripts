@@ -1,0 +1,366 @@
+'''GOAL: THIS SCRIPT TRIGGERS ON WELL OBJECTS TO GENERATE A CHECKLIST WITHIN M-FILES FOR WELLS THAT ARE READY TO BE PROCESSED. WELL OBJECTS ARE
+''' CREATED FROM A SQL TABLE, WHEN THE SPUD DATE, STATE, AND WELL OPERATOR ARE SELECTED, IS THE WELL OPERATOR IS A WHITING WELL, THIS EVENT HANDLER, 
+''' WILL KICK OFF THE FIRST STEP IN INITIATING THE PROPER WORKFLOWS. IT WILL GENERATE A CHECKLIST (REPORTING OBJECT) AND AUTOMATION PROCESS CHECKLIST 
+''' WHICH IS USED TO DEFINE WHICH WORKFLOWS NEED TO BE INITIATED FOR THE SPECIFIC WELL. 
+'''
+'''CREATED BY : ANTOINE IBRAHIM
+'''VERSION : 1.2: added RC License Number, pad name, and federal flag to the checklist, and updated get agency code
+'''LAST MODIFIED: 01/29/2020
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+'GET DEF IDS OF PROPERTIES OF INTEREST
+Dim SpudDate_DefID : SpudDate_DefID =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.SpudDate")
+Dim wellOperator_DefID : wellOperator_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.WellOperator")
+Dim wellSingle_DefID :  wellSingle_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.Well.Single")
+Dim UsStates_DefID : UsStates_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.State.single")
+Dim DOFP_DefID : DOFP_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.DOFP")
+Dim Agency_DefID : Agency_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.Agency")
+Dim SubmittalType_DefID : SubmittalType_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.SubmittalType")
+Dim Prospect_DefID : Prospect_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.Prospect")
+Dim RCLicenceNum_DefID : RCLicenceNum_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.LicenseNo")
+Dim padNumber_DefID : padNumber_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.Pad")
+Dim isFederal_DefID : isFederal_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.Federal.Q")
+
+' value list def ids 
+Dim AgencyVL_DefId : AgencyVL_DefId = Vault.ValueListOperations.GetValueListIDByAlias("VL.Agencies")
+Dim SubmittalTypeVL_DefId : SubmittalTypeVL_DefId = Vault.ValueListOperations.GetValueListIDByAlias("VL.SubmittalType")
+
+' object DefIds
+Dim AutomationChecklist_OBJID : AutomationChecklist_OBJID = Vault.ObjectTypeOperations.GetObjectTypeIDByAlias("Object.RCAutomationChecklist")
+Dim WellChecklist_ObjID : WellChecklist_ObjID = Vault.ObjectTypeOperations.GetObjectTypeIDByAlias("Object.WellCheckList")
+
+
+' GET THE DEF ID'S FOR THE CLASSES OF INTEREST (WELLS)
+Dim Well_Class_DefID : Well_Class_DefID = Vault.ClassOperations.GetObjectClassIDByAlias( "Class.Well" )
+Dim AutomationChecklist_Class_DefID : AutomationChecklist_Class_DefID = Vault.ClassOperations.GetObjectClassIDByAlias( "Class.Obj.RCProcessAutomationChecklist" )
+Dim WellChecklist_Class_DefID : WellChecklist_Class_DefID = Vault.ClassOperations.GetObjectClassIDByAlias( "Class.WF.DB.Checklist" )
+Dim WellRule_Class_DefID : WellRule_Class_DefID = Vault.ClassOperations.GetObjectClassIDByAlias( "Class.Obj.RCProcessAutomationRules" )
+
+' set up arraylists needed
+Dim WellOperatorList : Set WellOperatorList = CreateObject("System.Collections.ArrayList")
+Dim StateList : Set StateList = CreateObject("System.Collections.ArrayList")
+SetUpArrayLists
+
+Const Class_DefID = 100
+' get property values
+Dim PropertyVals : set PropertyVals = Vault.ObjectPropertyOperations.GetProperties( ObjVer, false ) 
+Dim CurrentClass_DefID : CurrentClass_DefID =Vault.ObjectPropertyOperations.GetProperty( ObjVer, Class_DefID ).Value.GetLookupID()
+
+
+' IF THE CLASS OF THE CURRENT OBJECT IS WELL THEN CONTINUE WITH FUNCTIONALITY 
+If (CurrentClass_DefID = Well_Class_DefID) Then
+	' IF spud date and well operator and state are on the metadata card process
+
+	If PropertyVals.IndexOf(SpudDate_DefID) > -1 AND PropertyVals.IndexOf(wellOperator_DefID) > -1 AND PropertyVals.IndexOf(UsStates_DefID) > -1 Then
+			
+		Dim SupdDate_value : SupdDate_value = PropertyVals.SearchForProperty(SpudDate_DefID).Value.DisplayValue
+		Dim Operator_value : Operator_value = PropertyVals.SearchForProperty(wellOperator_DefID).Value.DisplayValue
+		Dim UsState_value : UsState_value = PropertyVals.SearchForProperty(UsStates_DefID).Value.DisplayValue
+
+		'IF SPUD DATE IS NOT NULL And Operator/State is set to something of interest PROCESS
+		IF (SupdDate_value <> ""  and WellOperatorList.Contains(Operator_value) and AutomationRuleExists(UsState_value)= True ) Then 
+			Dim ObjectVersions : Set ObjectVersions = Vault.ObjectOperations.GetHistory(ObjVer.ObjID)
+			
+			'if it is a new well 
+			If ObjectVersions.Count = 1 Then
+				BeginRCProcess 
+			End If
+		
+			' Otherwise if there is more than one version only process if previous version had an empty spud date.
+			If ObjectVersions.Count > 1 Then
+				' get the spud date from the last version to compare
+				Dim LastVersionObjVer : set LastVersionObjVer = ObjectVersions.Item(2).ObjVer
+				Dim LastVer_PropertyVals : set LastVer_PropertyVals = Vault.ObjectPropertyOperations.GetProperties( LastVersionObjVer, false ) 
+				' if the spud date was blank in the previous version, and is no longer empty, then add a checklist for it for processing
+				if (LastVer_PropertyVals.SearchForProperty(SpudDate_DefID).Value.DisplayValue="" And SupdDate_value <> "") Then
+					BeginRCProcess
+				End If 
+
+			End If
+			 
+		End IF 
+	End IF 
+End If
+
+'============================================='
+'============= HELPER FUNCTIONS =============='
+'============================================='
+
+' function that manages the creation of the checklist objects
+Function BeginRCProcess()
+	Dim Well_DDL_ID : Well_DDL_ID = ObjVer.ID
+	Dim State_DDL_ID : State_DDL_ID = PropertyVals.SearchForProperty(UsStates_DefID).Value.GetLookupID()
+	Dim DOFP_value : DOFP_value = PropertyVals.SearchForProperty(DOFP_DefID).Value.DisplayValue
+
+'	Create an RC Automation Checklist if one does not already exist
+	if(	CheckForObjectsWithSelectedItem(AutomationChecklist_Class_DefID, wellSingle_DefID, Well_DDL_ID) =0 and AutomationChecklist_OBJID <>-1 And  AutomationChecklist_Class_DefID <> -1) Then
+		CreateObjectInMfiles AutomationChecklist_OBJID, AutomationChecklist_Class_DefID 
+	End if
+
+	' Create an actual checklist if one does not already exist
+	if(	CheckForObjectsWithSelectedItem(WellChecklist_Class_DefID, wellSingle_DefID, Well_DDL_ID) =0 And WellChecklist_ObjID <> -1 And WellChecklist_Class_DefID <>-1 ) Then
+		CreateRcChecklist WellChecklist_ObjID, WellChecklist_Class_DefID 
+	End if
+End Function
+
+
+'creates the RC Checklist object 
+Function CreateRcChecklist(objectId, ClassID)
+	'set the class property
+	Dim oPropertyValues  : Set oPropertyValues  = CreateObject("MFilesAPI.PropertyValues")
+	Dim ClassProp : set ClassProp=  CreateObject("MFilesAPI.PropertyValue")
+	ClassProp.PropertyDef = MFilesAPI.MFBuiltInPropertyDef.MFBuiltInPropertyDefClass
+	ClassProp.TypedValue.SetValue MFDataType.MFDatatypeLookup, ClassID 
+	oPropertyValues.Add -1, ClassProp
+
+	'set the well property
+	Dim WellProp : set WellProp=  CreateObject("MFilesAPI.PropertyValue")
+	WellProp.PropertyDef = wellSingle_DefID
+	WellProp.TypedValue.SetValue MFDataType.MFDatatypeLookup, ObjVer.ID 
+	oPropertyValues.Add -1, WellProp
+
+	'set GW prospect if it exists on the well
+	if (PropertyVals.IndexOf(Prospect_DefID)>-1) Then
+		Dim GW_Prospect_Prop : set GW_Prospect_Prop = PropertyVals.SearchForProperty(Prospect_DefID)
+		oPropertyValues.Add -1, GW_Prospect_Prop
+	End if
+	' set the spud date property if it exists on the well
+	if (PropertyVals.IndexOf(SpudDate_DefID)>-1) Then
+		Dim SpudDate_Prop : set SpudDate_Prop = PropertyVals.SearchForProperty(SpudDate_DefID)
+		oPropertyValues.Add -1, SpudDate_Prop
+	End if 
+	' set the dofp date property if it exists on the well
+	if (PropertyVals.IndexOf(DOFP_DefID)>-1) Then
+		If (PropertyVals.SearchForProperty(DOFP_DefID).Value.DisplayValue <> "") Then
+			Dim Dofp_Prop : set Dofp_Prop = PropertyVals.SearchForProperty(DOFP_DefID)
+			oPropertyValues.Add -1, Dofp_Prop
+		End If
+	End if
+
+	' set the NDIC# property AKA (RC Licence Number) if it exists on the well
+	if (PropertyVals.IndexOf(RCLicenceNum_DefID)>-1) Then
+		Dim NdicNum_Prop : set NdicNum_Prop = PropertyVals.SearchForProperty(RCLicenceNum_DefID)
+		oPropertyValues.Add -1, NdicNum_Prop
+	End if 
+		' set the pad name property if it exists on the well
+	if (PropertyVals.IndexOf(padNumber_DefID)>-1) Then
+		Dim PadName_Prop : set PadName_Prop = PropertyVals.SearchForProperty(padNumber_DefID)
+		oPropertyValues.Add -1, PadName_Prop
+	End if 
+
+	' generate the object in M-Files 
+	Dim sourceFiles : set sourceFiles = CreateObject("MFilesAPI.SourceObjectFiles")
+	Dim oObjectVersionAndProperties : Set oObjectVersionAndProperties  = Vault.ObjectOperations.CreateNewObjectEx(objectId, oPropertyValues,sourceFiles, false, true, nothing)
+End Function
+
+' create the rc automation checklist object in M-Files 
+Function CreateObjectInMfiles( objectId, ClassID) ', SelectedWellID, SelectedStateID, SelectedDOFP)
+	'set object property values
+	Dim oPropertyValues  : Set oPropertyValues  = CreateObject("MFilesAPI.PropertyValues")
+	Dim wellIndex : wellIndex = PropertyVals.IndexOf(wellSingle_DefID)
+	Dim StateIndex : StateIndex = PropertyVals.IndexOf(UsStates_DefID)
+	Dim DOFPIndex : DOFPIndex = PropertyVals.IndexOf(DOFP_DefID)
+
+	'add class property 
+	Dim ClassProp : set ClassProp=  CreateObject("MFilesAPI.PropertyValue")
+	ClassProp.PropertyDef = MFilesAPI.MFBuiltInPropertyDef.MFBuiltInPropertyDefClass
+	ClassProp.TypedValue.SetValue MFDataType.MFDatatypeLookup, ClassID 
+	oPropertyValues.Add -1, ClassProp
+
+	' add well property 
+	Dim WellProp : set WellProp=  CreateObject("MFilesAPI.PropertyValue")
+	WellProp.PropertyDef = wellSingle_DefID
+	WellProp.TypedValue.SetValue MFDataType.MFDatatypeLookup, ObjVer.ID 
+	oPropertyValues.Add -1, WellProp
+
+	' add submittal property 
+	Dim SubmittalProp : set SubmittalProp =  CreateObject("MFilesAPI.PropertyValue")
+	SubmittalProp.PropertyDef = SubmittalType_DefID
+	SubmittalProp.TypedValue.SetValue MFDataType.MFDatatypeLookup, SearchForVLItemByValue (SubmittalTypeVL_DefId, "New Well Processes" ) 
+	oPropertyValues.Add -1, SubmittalProp
+
+	'sets prospect property
+	if (PropertyVals.IndexOf(Prospect_DefID) <>-1) Then
+		Dim ProspectProp : set ProspectProp = PropertyVals.SearchForProperty(Prospect_DefID)
+		oPropertyValues.Add -1, ProspectProp
+	End IF
+	
+	'sets isFederal property
+	if (PropertyVals.IndexOf(isFederal_DefID) <> -1) Then
+		Dim isFederalProp : set isFederalProp = PropertyVals.SearchForProperty(isFederal_DefID)
+		oPropertyValues.Add -1, isFederalProp
+	End IF
+
+	'set state and Dofp propertyes
+	if (StateIndex <> -1 ) Then
+		Dim StateProp : set StateProp = PropertyVals( StateIndex )
+		oPropertyValues.Add -1, StateProp
+	End if 
+	'sets dofp property
+	if (DOFPIndex <> -1 ) Then
+		If (PropertyVals.SearchForProperty(DOFP_DefID).Value.DisplayValue <> "") Then
+			Dim DOFPProp : set DOFPProp = PropertyVals( DOFPIndex )
+			oPropertyValues.Add -1, DOFPProp
+		End If
+	End If
+	
+	'sets agency property
+	Dim AgencyId : AgencyId = GetAgencyFromState() 'get agency value 
+	if AgencyId <> -1 then 
+		'Err.Raise MFScriptCancel, "has agency "& AgencyId
+		Dim AgencyProperty : set AgencyProperty = CreateObject("MFilesAPI.PropertyValue")
+		AgencyProperty.PropertyDef = Agency_DefID
+		AgencyProperty.TypedValue.SetValue MFDataType.MFDatatypeLookup, AgencyId
+		oPropertyValues.Add -1, AgencyProperty
+	end if 
+	
+	'sets wf and state properties
+	Dim wfID : 	wfID =vault.WorkflowOperations.GetWorkflowIDByAlias("WF.RCAutomationChecklistProcess")
+	Dim WfState : WfState = vault.WorkflowOperations.GetWorkflowStateIDByAlias("WF.Automation.InputWellInfo")
+	if (wfID<> -1)Then
+		Dim WFProp : set WFProp=  CreateObject("MFilesAPI.PropertyValue")
+		WFProp.PropertyDef = 38
+		WFProp.TypedValue.SetValue MFDataType.MFDatatypeLookup, wfID 
+		oPropertyValues.Add -1, WFProp
+	End if 
+
+	if (WfState <> -1 ) Then 
+		Dim WfStateProp : set WfStateProp=  CreateObject("MFilesAPI.PropertyValue")
+		WfStateProp.PropertyDef = 39
+		WfStateProp.TypedValue.SetValue MFDataType.MFDatatypeLookup, WfState 
+		oPropertyValues.Add -1, WfStateProp
+	End if 
+	
+	'create opject in Mfiles
+	Dim sourceFiles : set sourceFiles = CreateObject("MFilesAPI.SourceObjectFiles")
+	Dim oObjectVersionAndProperties : Set oObjectVersionAndProperties  = Vault.ObjectOperations.CreateNewObjectEx(objectId, oPropertyValues,sourceFiles, false, true, nothing)
+End Function
+
+' this function gets the agency based on the state
+Function GetAgencyFromState()
+	Dim agencyItemID : agencyItemID = -1
+	If PropertyVals.IndexOf(UsStates_DefID) > -1  Then
+		Dim State_value : State_value = PropertyVals.SearchForProperty(UsStates_DefID).Value.DisplayValue
+		if (State_value <> "" ) Then
+			Dim oSearchConditions : Set oSearchConditions = CreateObject("MFilesAPI.SearchConditions")
+			Dim oClassSearchCondition : Set oClassSearchCondition = GetSearchConditionForLookupByID(100, WellRule_Class_DefID)
+			oSearchConditions.Add -1, oClassSearchCondition
+		
+			Dim oSearchCondition : Set oSearchCondition = CreateObject("MFilesAPI.SearchCondition")
+			oSearchCondition.Expression.SetPropertyValueExpression UsStates_DefID, MFParentChildBehaviorNone, Nothing
+			oSearchCondition.ConditionType = MFConditionTypeEqual 
+			oSearchCondition.TypedValue.SetValue MFDatatypeText, State_value
+			oSearchConditions.Add -1, oSearchCondition 
+		
+			'get only non deleted items
+			Dim NotDeletedCondition : Set NotDeletedCondition = CreateObject("MFilesAPI.SearchCondition")
+			NotDeletedCondition.Expression.SetStatusValueExpression MFStatusType.MFStatusTypeDeleted, Nothing
+			NotDeletedCondition.ConditionType = MFConditionTypeEqual
+			NotDeletedCondition.TypedValue.SetValue MFDatatypeBoolean, false	
+			oSearchConditions.Add -1, NotDeletedCondition
+			
+			Dim oSearchResults : set oSearchResults = Vault.ObjectSearchOperations.SearchForObjectsByConditions(oSearchConditions, 0, false)
+			
+			if (oSearchResults.Count >0) then
+				Dim WellRule_ObVerAndProps : set WellRule_ObVerAndProps =Vault.ObjectOperations.GetObjectVersionAndProperties(oSearchResults(1).ObjVer, false)
+				Dim WellRuleProperties : set WellRuleProperties = WellRule_ObVerAndProps.Properties
+				if (WellRuleProperties.IndexOf(Agency_DefID)) Then					
+					agencyItemID = WellRuleProperties.SearchForProperty(Agency_DefID).TypedValue.GetValueAsLookup().Item
+				End If
+			end if 
+
+		End if 	
+	End If 
+	GetAgencyFromState = agencyItemID
+End Function
+
+
+'helper function that takes in a valuelist def id and a value, and returns the id of the item in the value list
+Function SearchForVLItemByValue(ValueList_DefID, ItemValue)
+	Dim  agencyID : agencyID = -1
+	
+	'search condition for the text value we are looking for 
+	Dim oSearchConditions : Set oSearchConditions = CreateObject("MFilesAPI.SearchConditions")
+	Dim oVLItemSearchCondition : Set oVLItemSearchCondition = CreateObject("MFilesAPI.SearchCondition")
+	oVLItemSearchCondition.Expression.SetValueListItemExpression MFValueListItemPropertyDefName,MFParentChildBehaviorNone, Nothing
+	oVLItemSearchCondition.ConditionType = MFConditionTypeStartsWith 
+	oVLItemSearchCondition.TypedValue.SetValue MFDatatypeText, ItemValue
+
+	oSearchConditions.Add -1, oVLItemSearchCondition 
+
+	'get only non deleted items
+	Dim NotDeletedCondition : Set NotDeletedCondition = CreateObject("MFilesAPI.SearchCondition")
+	NotDeletedCondition.Expression.SetValueListItemExpression MFValueListItemPropertyDefDeleted, MFParentChildBehaviorNone, Nothing
+	NotDeletedCondition.ConditionType = MFConditionTypeEqual
+	NotDeletedCondition.TypedValue.SetValue MFDatatypeBoolean, false	
+	oSearchConditions.Add -1, NotDeletedCondition
+
+	Dim Results : set Results = vault.ValueListItemOperations.SearchForValueListItemsEx(ValueList_DefID, oSearchConditions)
+	If Results.Count >0 Then 
+		agencyID = Results(1).ID
+	End If
+
+	SearchForVLItemByValue = agencyID
+End Function
+
+
+Function SetUpArrayLists ()
+	WellOperatorList.Add "WHITING OIL & GAS CORPORATION"
+	WellOperatorList.Add "WHITING OIL AND GAS CORPORATION"
+	WellOperatorList.Add "WHITING PETROLEUM CORPORATION"
+	WellOperatorList.Add "WOGC"
+End Function
+
+'helper function to check if an automation checklist rule exists for a specific state. 
+Function AutomationRuleExists(state)
+	Dim oSearchConditions : Set oSearchConditions = CreateObject("MFilesAPI.SearchConditions")
+	Dim oClassSearchCondition : Set oClassSearchCondition = GetSearchConditionForLookupByID(100, WellRule_Class_DefID)
+	oSearchConditions.Add -1, oClassSearchCondition
+
+	Dim oSearchCondition : Set oSearchCondition = CreateObject("MFilesAPI.SearchCondition")
+	oSearchCondition.Expression.SetPropertyValueExpression UsStates_DefID, MFParentChildBehaviorNone, Nothing
+	oSearchCondition.ConditionType = MFConditionTypeEqual 
+	oSearchCondition.TypedValue.SetValue MFDatatypeText, state
+	oSearchConditions.Add -1, oSearchCondition 
+
+	'get only non deleted items
+	Dim NotDeletedCondition : Set NotDeletedCondition = CreateObject("MFilesAPI.SearchCondition")
+	NotDeletedCondition.Expression.SetStatusValueExpression MFStatusType.MFStatusTypeDeleted, Nothing
+	NotDeletedCondition.ConditionType = MFConditionTypeEqual
+	NotDeletedCondition.TypedValue.SetValue MFDatatypeBoolean, false	
+	oSearchConditions.Add -1, NotDeletedCondition
+	
+	Dim oSearchResults : set oSearchResults = Vault.ObjectSearchOperations.SearchForObjectsByConditions(oSearchConditions, 0, false)
+	AutomationRuleExists = oSearchResults.Count > 0
+End Function
+
+'CREATES A SEARCH CONDITION FOR A LOOKUP WITH A SPECIFIC LOOKUP ID 
+public Function GetSearchConditionForLookupByID(PropertyDefID, lookupInternalId)
+	
+	' Create a lookup referencing this class ID.
+	Dim oLookup : Set oLookup = CreateObject("MFilesAPI.Lookup")
+	oLookup.Item = lookupInternalId
+
+	' Define the search condition.'
+	Dim oSearchCondition : Set oSearchCondition = CreateObject("MFilesAPI.SearchCondition")
+	oSearchCondition.Expression.SetPropertyValueExpression PropertyDefID, MFParentChildBehaviorNone, Nothing
+	oSearchCondition.ConditionType = 1
+	'oSearchCondition.TypedValue = oPropertyValue
+	oSearchCondition.TypedValue.SetValueToLookup(oLookup)
+
+	' Return the search condition.'
+	Set GetSearchConditionForLookupByID = oSearchCondition
+End Function
+
+' takes in a class, property def id , and look up id and searches the vault to see if there are any objects with the specified criteria
+Function CheckForObjectsWithSelectedItem(classId, Prop_Defid, lookupID)
+	Dim oSearchConditions : Set oSearchConditions = CreateObject("MFilesAPI.SearchConditions")
+	Dim oClassSearchCondition : Set oClassSearchCondition = GetSearchConditionForLookupByID(100, classId)
+	oSearchConditions.Add -1, oClassSearchCondition
+
+	Dim oPropertySearchCondition : Set oPropertySearchCondition = GetSearchConditionForLookupByID(Prop_Defid, lookupID)
+	oSearchConditions.Add -1, oPropertySearchCondition
+
+	Dim oSearchResults : set oSearchResults = Vault.ObjectSearchOperations.SearchForObjectsByConditions(oSearchConditions, 0, false)
+	GetProcessDefinition = oSearchResults.Count
+End Function

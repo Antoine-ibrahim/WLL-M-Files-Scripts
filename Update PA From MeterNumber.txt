@@ -1,0 +1,231 @@
+'''GOAL: THIS SCRIPT TRIGGERS FOR THE "PRODUCTION ACCOUNTING" CLASS. IT WILL USE THE METER NUMBER PROPERTY TO RETRIEVE THE ASSOCIATED BATTERY FROM 
+''' THE DB AND THEN UPDATE THE APPROPRIATE METADATA FIELDS IN THE METADATA CARD.
+'''
+'''CREATED BY : ANTOINE IBRAHIM
+'''VERSION : 1.0
+'''LAST MODIFIED: 2/07/2020
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+' GET THE DEF ID'S FOR ALL THE PROPERTIES OF INTEREST ON THE CURRENT METADTA CARD 
+Dim OilLeaseMeterNumber_DefID : OilLeaseMeterNumber_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.OilLeaseMeterNumber")
+Dim DocTypePa_DefID : DocTypePa_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.DocumentType-PA.single")
+Dim BatteryProperty_Defid : BatteryProperty_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.Battery.Single")
+Dim EntityID_DefId : EntityID_DefId = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.EntityID.Single")
+Dim MerricID_DefId : MerricID_DefId = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.MerrickID.Single")
+Dim UsState_DefId : UsState_DefId = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.State.single")
+Dim StatesVl_DefID : StatesVl_DefID = Vault.ValueListOperations.GetValueListIDByAlias("VL.States")
+
+' GET THE DEF ID'S FOR THE CLASS OF INTEREST (PRODUCTION ACCOUNTING)
+Dim PA_Class_DefID : PA_Class_DefID = Vault.ClassOperations.GetObjectClassIDByAlias( "Class.Document.ProductionAccounting" )
+Dim Battery_Class_DefId : Battery_Class_DefId = Vault.ClassOperations.GetObjectClassIDByAlias( "Class.Battery" )
+Const Class_DefID = 100
+Const DB_CONNECT_STRING = "Provider=SQLOLEDB.1;Password={password};Persist Security Info=True;User ID={username};Initial Catalog=M-Files;Data Source={source}"
+Const ViewName = "[M-Files].[operations].[vBatteryOilLeaseGasMeter]"
+
+'default vaules
+Dim DocTypePaVal : DocTypePaVal =""
+DIM OilLeaseMeterNumberVal : OilLeaseMeterNumberVal =""
+Dim EntityIDVal : EntityIDVal =""
+Dim MerricIDVal : MerricIDVal =""
+Dim UsStateVal : UsStateVal =""
+
+
+' Get the properties of the object.
+dim PropertyVals : set PropertyVals = Vault.ObjectPropertyOperations.GetProperties( ObjVer, false )
+
+Dim CurrentClass_DefID : CurrentClass_DefID =Vault.ObjectPropertyOperations.GetProperty( ObjVer, Class_DefID ).Value.GetLookupID()
+' IF THE CLASS OF THE CURRENT OBJECT BEING CHECKDED IS "DIVISION ORDER TRANS OR PC REQUEST" CONTINUE WITH FUNCTIONALITY 
+IF (CurrentClass_DefID = PA_Class_DefID ) Then
+	
+	' IF AUTHORIZATION NUMBER HAS A VALUE, GET THE REST OF THE PROPERTIES VALUES USING THE BOLO OWNER NUMBER
+	IF PropertyVals.IndexOf(DocTypePa_DefID) > -1 AND  PropertyVals.IndexOf(OilLeaseMeterNumber_DefID) > -1 Then
+		DocTypePaVal = PropertyVals.SearchForProperty(DocTypePa_DefID).Value.DisplayValue
+		OilLeaseMeterNumberVal =PropertyVals.SearchForProperty(OilLeaseMeterNumber_DefID).Value.DisplayValue
+		'Get THE VALUE FOR ALL THE PROPERTIES FROM THE DB
+		IF OilLeaseMeterNumberVal <> "" AND (DocTypePaVal = "Oil Info" OR DocTypePaVal ="Gas Info") Then
+			
+			GetDataFromDB 
+			
+			'check if there is a battery with the specified entity id
+			Dim BatteryResults : set BatteryResults = SearchForBatteryByEntityID
+		
+			IF	BatteryResults.Count >0 Then	
+			' get the battery and add it to the metadata card
+			Dim Battery_ObVerAndProps : set Battery_ObVerAndProps =Vault.ObjectOperations.GetObjectVersionAndProperties(BatteryResults(1).ObjVer, false)
+			updatePropertyValue BatteryProperty_Defid, Battery_ObVerAndProps.ObjVer.ID 
+			
+			' get properties of the battery and update the entity and merric id 
+			Dim BatteryProperties : set BatteryProperties = Battery_ObVerAndProps.Properties
+			
+			'set entity id if exists
+			If BatteryProperties.IndexOf(EntityID_DefId) > -1 Then
+				dim EntityIDProp : set EntityIDProp = BatteryProperties.SearchForProperty( EntityID_DefId )
+				Vault.ObjectPropertyOperations.SetProperty ObjVer, EntityIDProp
+			End if
+
+			If BatteryProperties.IndexOf(MerricID_DefId) > -1 Then
+				dim MerricIDProp : set MerricIDProp = BatteryProperties.SearchForProperty( MerricID_DefId )
+				Vault.ObjectPropertyOperations.SetProperty ObjVer, MerricIDProp
+			End if
+			'validate and update the US States field 
+			Dim Stateid : Stateid = SearchForVLItemByValue (StatesVl_DefID, UsStateVal)
+			updatePropertyValue UsState_DefId, Stateid 
+
+			
+			END IF
+		END IF 
+	END IF
+
+
+	'MAKE SURE THE MODIFIED BY USER, IS THE CURRENT USER 
+	Const ModifiedBy = 23
+	Dim lastModifiedVal : Set lastModifiedVal = CreateObject("MFilesAPI.TypedValue")
+	lastModifiedVal.Value = Now
+	Dim SetModifiedToCurrentUser : set SetModifiedToCurrentUser =Vault.ObjectPropertyOperations.SetLastModificationInfoAdmin (ObjVer, True, PropertyVals.SearchForProperty(ModifiedBy).Value , True, lastModifiedVal)
+End If
+
+
+'============================================='
+'============= HELPER FUNCTIONS =============='
+'============================================='
+
+public function GetDataFromDB()
+'	
+	Dim SQL : SQL = "SELECT top 1 [SourceSystemKey] as [EntityID], " & _
+							"[MerrickID] as [MerrickID], " & _
+							"[StateShort] as [UsState] " & _
+							"FROM "& ViewName & " where [UserStringA] ='" & OilLeaseMeterNumberVal &"' or  [MeterNumber] ='" & OilLeaseMeterNumberVal &"'"
+
+	Dim myConn : Set myConn = CreateObject("ADODB.Connection")
+	DIM RS : SET RS = CreateObject("ADODB.recordset") 'new
+	
+	on error resume next
+	
+	myConn.Open DB_CONNECT_STRING
+	RS.Open SQL,myConn 
+
+	' if there is an error , close the RS and DB COnnection , and set them to null 
+	If Err.Number <> 0 Then
+		SessionDescVal = "rs state= "& RS.State & " DB State:" & myConn.State
+		If RS.State = 1 Then
+	        RS.Close
+			SET RS = Nothing
+			SessionDescVal = SessionDescVal & "Closing RS"
+		End If
+		If myConn.State = 1 Then
+	        myConn.Close
+			SET myConn = Nothing
+			SessionDescVal = SessionDescVal & ",Closing DB COnn"
+		End If
+		SessionDescVal = SessionDescVal & " err num" & Err.Number & " Desc: "& Err.Description
+		Err.Clear
+	else 	
+		If NOT RS.EOF  Then 
+			EntityIDVal = RS("EntityID")
+			MerricIDVal = RS("MerrickID")
+			UsStateVal = RS("UsState")
+		end if 
+	End if 	
+
+	If RS.State = 1 Then
+        RS.Close
+		SET RS = Nothing
+	End If
+	If myConn.State = 1 Then
+        myConn.Close
+		SET myConn = Nothing
+	End If
+End Function
+
+
+'helper function that takes in a valuelist def id and a value, and returns the id of the item in the value list
+Function SearchForBatteryByEntityID()
+		
+	'class search condition
+	Dim oSearchConditions : Set oSearchConditions = CreateObject("MFilesAPI.SearchConditions")
+	Dim oClassSearchCondition : Set oClassSearchCondition = GetSearchConditionForLookupByID(100, Battery_Class_DefId)
+	oSearchConditions.Add -1, oClassSearchCondition
+
+	'Battery Entity search condition
+	Dim oEntityIDCondition : Set oEntityIDCondition = CreateObject("MFilesAPI.SearchCondition")
+	oEntityIDCondition.Expression.SetPropertyValueExpression EntityID_DefId, MFParentChildBehaviorNone, Nothing
+	oEntityIDCondition.ConditionType = MFConditionTypeContains 
+	oEntityIDCondition.TypedValue.SetValue MFDatatypeText, EntityIDVal
+	oSearchConditions.Add -1, oEntityIDCondition 	
+	
+	'get only non deleted items 
+	Dim NotDeletedCondition : Set NotDeletedCondition = CreateObject("MFilesAPI.SearchCondition")
+	NotDeletedCondition.Expression.SetStatusValueExpression MFStatusTypeDeleted, Nothing
+	NotDeletedCondition.ConditionType = MFConditionTypeEqual
+	NotDeletedCondition.TypedValue.SetValue MFDatatypeBoolean, false	
+	oSearchConditions.Add -1, NotDeletedCondition
+
+	Dim oSearchResults : set oSearchResults = Vault.ObjectSearchOperations.SearchForObjectsByConditions(oSearchConditions, 0, false)
+											  
+	set SearchForBatteryByEntityID = oSearchResults		
+End Function
+
+' THIS FUNCTION IS USED TO SET ANY DATE OR TEXT FIELD,
+' IF A DATE OR TEXT IS PROVIDED AS THE PROPVALUE, IT CHECKS THAT THE FIELD EXISTS AND IF IT DOES IT UPDATES THE VALUE
+
+public function updatePropertyValue( PropDefID, propValue)
+	IF PropertyVals.IndexOf(PropDefID) > -1  Then
+			dim PropertyToChange : set PropertyToChange = PropertyVals.SearchForProperty(PropDefID)
+			
+			if (PropertyToChange.Value.DataType = MFDatatypeDate and (propValue= "1/1/1900"  or propValue= ""  )) then
+				PropertyToChange.Value.SetValue PropertyToChange.Value.DataType, null
+			else  
+				'Err.Raise MFScriptCancel, PropertyToChange.Value.DataType &" value " & propValue
+				PropertyToChange.Value.SetValue PropertyToChange.Value.DataType, propValue
+			End if
+			Vault.ObjectPropertyOperations.SetProperty ObjVer, PropertyToChange
+	End IF 	
+End Function
+
+
+'CREATES A SEARCH CONDITION FOR A LOOKUP WITH A SPECIFIC LOOKUP ID 
+public Function GetSearchConditionForLookupByID(PropertyDefID, lookupInternalId)
+	
+	' Create a lookup referencing this class ID.
+	Dim oClassLookup : Set oClassLookup = CreateObject("MFilesAPI.Lookup")
+	oClassLookup.Item = lookupInternalId
+
+	' Define the search condition.'
+	Dim oSearchCondition : Set oSearchCondition = CreateObject("MFilesAPI.SearchCondition")
+	oSearchCondition.Expression.SetPropertyValueExpression PropertyDefID, MFParentChildBehaviorNone, Nothing
+	oSearchCondition.ConditionType = 1
+	'oSearchCondition.TypedValue = oPropertyValue
+	oSearchCondition.TypedValue.SetValueToLookup(oClassLookup)
+
+	' Return the search condition.'
+	Set GetSearchConditionForLookupByID = oSearchCondition
+
+End Function
+
+Function SearchForVLItemByValue(ValueList_DefID, ItemValue)
+	Dim  VLItemID : VLItemID = -1
+	
+	'search condition for the text value we are looking for 
+	Dim oSearchConditions : Set oSearchConditions = CreateObject("MFilesAPI.SearchConditions")
+	Dim oVLItemSearchCondition : Set oVLItemSearchCondition = CreateObject("MFilesAPI.SearchCondition")
+	oVLItemSearchCondition.Expression.SetValueListItemExpression MFValueListItemPropertyDefName,MFParentChildBehaviorNone, Nothing
+	oVLItemSearchCondition.ConditionType = MFConditionTypeEqual 
+	oVLItemSearchCondition.TypedValue.SetValue MFDatatypeText, ItemValue
+
+	oSearchConditions.Add -1, oVLItemSearchCondition 
+
+	'get only non deleted items
+	Dim NotDeletedCondition : Set NotDeletedCondition = CreateObject("MFilesAPI.SearchCondition")
+	NotDeletedCondition.Expression.SetValueListItemExpression MFValueListItemPropertyDefDeleted, MFParentChildBehaviorNone, Nothing
+	NotDeletedCondition.ConditionType = MFConditionTypeEqual
+	NotDeletedCondition.TypedValue.SetValue MFDatatypeBoolean, false	
+	oSearchConditions.Add -1, NotDeletedCondition
+	
+	Dim Results : set Results = vault.ValueListItemOperations.SearchForValueListItemsEx(ValueList_DefID, oSearchConditions)
+	If Results.Count >0 Then 
+		VLItemID = Results(1).ID
+	End If
+
+	SearchForVLItemByValue = VLItemID
+End Function
+

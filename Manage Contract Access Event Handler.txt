@@ -1,0 +1,178 @@
+'''GOAL: THERE ARE CERTAIN PROPERTIES THAT ARE HIDDEN TO ALL USERS EXCEPT USERS THAT ARE PART OF THE CONTRACT MANAGEMENT DEPARTMENT. 
+''' IN CERTAIN CASES THE CONTRACT MANAGEMENT DEPARTMENT, NEEDS TO SHARE CERTAIN DOCUMENTS WITH USERS OUTSIDE OF THEIR DEPARTMENT. 
+''' THIS SCRIPT ALLOWS CERTAIN SUPERUSERS TO ADD A USER TO THE "CONTRACT TRACKER GUEST" USERGROUP, FROM M-FILES, BY ADDING THEIR USERID
+''' TO THE CONTRACT ACCESS PROPERTY. BY ADDING THE USERS TO THIS GROUP, THE GUEST USER IS THEN GRANTED THE ABILITY TO VIEW AND SEARCH ON CERTAIN PROPERTIES 
+''' AND DOCUMENTS THAT ARE ASSOCIATED WITH THE PARTICULAR DEPARTMENT. ALSO IT PREVENTS CERTAIN ATTRIBUTES FROM DISPLAYING AS (HIDDEN) OR NOT DISPLAYING AT ALL 
+''' ON THE METADATA CARD. REMOVING THE USERNAME FROM THE PROPERTY VALUE ALSO REMOVES THEM FROM THE 
+''' USER GROUP THAT THEY WERE ADDED TO. THIS SCRIPT IS NEEDED BECAUSE OF THE COMPLEX PERMISSIONS THAT ARE ON THE VAULT'S ATTRIBUTES, CLASSES, AND SPECIFIC VALUES IN LISTS
+''' THAT ARE IN THE VAULT. ALSO IT REMOVES THE OVERHEAD FROM THE ADMIN WHO DOES NOT WANT TO CONTINUALLY MANAGE THESE GROUPS IN THE ADMIN TOOL. 
+'''
+'''
+'''CREATED BY : ANTOINE IBRAHIM
+'''VERSION : 1.0
+'''LAST MODIFIED: 06/28/2019
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+' SET THE DEF IDS FOR THE PROPERTIES AND CLASSES WE NEED
+Dim ContractAccess_DefID : ContractAccess_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.ContractCommunity")
+Dim ContractFolder_Class_DefID : ContractFolder_Class_DefID = Vault.ClassOperations.GetObjectClassIDByAlias( "Class.Object.ContractFolder" )
+Const Class_DefID =100
+
+'INITIALIZE ARRAY LISTS TO KEEP TRACK OF THE USERS THAT HAVE BEEN REMOVED AND ADDED TO THE OBJECT. 
+Dim OldContractAccess_List : Set OldContractAccess_List = CreateObject("System.Collections.ArrayList")
+Dim AddedUsers_List : Set AddedUsers_List =  CreateObject("System.Collections.ArrayList")
+Dim RemovedUsers_List : Set RemovedUsers_List = CreateObject("System.Collections.ArrayList")
+
+' GET THE DEF ID AND PROPERTY VALUES FOR THE CURRENT CLASS 
+Dim CurrentClass_DefID : CurrentClass_DefID = Vault.ObjectPropertyOperations.GetProperty( ObjVer, Class_DefID ).Value.GetLookupID()
+Dim PropertyVals : set PropertyVals = Vault.ObjectPropertyOperations.GetProperties( ObjVer, false )
+
+'GET THE USER GROUP THAT WE WILL BE ADDING USERS TO 
+Dim GuestGroupID : GuestGroupID = Vault.UserGroupOperations.GetUserGroupIDByAlias("UserGroup.ContractTrackerGuests")
+
+' IF THE CLASS OF THIS OBJECT IS A CONTRACT FOLDER, THEN CONTINUE
+If (CurrentClass_DefID = ContractFolder_Class_DefID AND GuestGroupID <> -1 ) Then '1
+	Dim ObjectVersions : Set ObjectVersions = Vault.ObjectOperations.GetHistory(ObjVer.ObjID)
+	Dim ObjVerPreviousVersion : set ObjVerPreviousVersion = nothing
+	
+	' IF THERE ARE MORE THAN ONE VERSIONS, THEN GET/SET THE PREVIOUS VERSION OF THIS OBJECT
+	If ObjectVersions.Count > 1 Then
+	    Set ObjVerPreviousVersion = ObjectVersions.Item(2).ObjVer
+	End IF
+	
+	'UPDATE THE ARRAY LISTS DEFINED ABOVE WITH USERS THAT HAVE BEEN ADDED/REMOVED FROM THE ATTRIBUTE, AND ADD/REMOVE FROM THE GROUP AS NEEDED
+	UpdateUserArrays ObjVerPreviousVersion, ObjectVersions.Count
+	AddUsersToGroup
+	RemoveUsersFromGroup
+End If
+
+
+
+
+'============================================='
+'============= HELPER FUNCTIONS =============='
+'============================================='
+
+' THIS FUNCTION TAKES IN THE PREVIOUS OBJVER, AND NUMBER OF VERSIONS, IF THERE ARE MORE THAN ONE VERSIONS FOR THIS OBJECT, 
+' THEN IT WILL COMPARE THE VAULES FOR THE PREVIOUS VERSION AND CURRENT VERSION AND UPDATE THE ADDUSER ARRAY, AND REMOVE USER ARRAY RESPECTIVELY 
+' 
+ 
+public function UpdateUserArrays(PrevObjver, NumOfVers)
+	' IF MORE THAN ONE VERSION, PROCEED
+	If NumOfVers >1  then 
+		' 'GET PROPVERY VALUES FOR OLD VERSION 
+		Dim PreviousPropVals : set PreviousPropVals = Vault.ObjectPropertyOperations.GetProperties( PrevObjver, false )
+		Dim UsersList 
+		Dim UserID
+		' IF THE CONTRACT ACCESS PROPERTY EXISTS AND IS ON THE METADATA CARD FOR THE OLDER VERSION, THEN GET A LIST OF THE USERS ADDED 
+		if PreviousPropVals.IndexOf(ContractAccess_DefID) >-1  Then
+			set UsersList = PreviousPropVals.SearchForProperty(ContractAccess_DefID).TypedValue.GetValueAsLookups()
+			If(UsersList.Count > 0 ) Then 
+				For i = 1 To UsersList.Count Step 1
+					UserID = PreviousPropVals.SearchForProperty(ContractAccess_DefID).TypedValue.GetValueAsLookups().Item(i).Item
+					OldContractAccess_List.Add UserID
+					RemovedUsers_List.Add UserID
+				Next
+			End If
+		End If
+		
+		' DETERMINE WHICH USERS WERE REMOVED/ADDED TO THE NEW VERSION 
+		if PropertyVals.IndexOf(ContractAccess_DefID) >-1 Then
+			set UsersList = PropertyVals.SearchForProperty(ContractAccess_DefID).TypedValue.GetValueAsLookups()
+			If(UsersList.Count > 0 ) Then 
+				For i = 1 To UsersList.Count Step 1
+					UserID = PropertyVals.SearchForProperty(ContractAccess_DefID).TypedValue.GetValueAsLookups().Item(i).Item
+					AddedUsers_List.Add UserID
+					If OldContractAccess_List.Contains(UserID) Then 
+						RemovedUsers_List.Remove UserID
+					End IF 
+				Next
+			End If
+		End IF
+	else 
+		'IF THERE IS ONLY ONE VERSION, IT HOPS IN THE ELSE STATEMENT, WHICH WILL ADDS ALL USERS TO THE ADDED USERS LIST. 
+		if PropertyVals.IndexOf(ContractAccess_DefID) >-1 Then
+			set UsersList  = PropertyVals.SearchForProperty(ContractAccess_DefID).TypedValue.GetValueAsLookups()
+			If(UsersList.Count > 0 ) Then 
+				For i = 1 To UsersList.Count Step 1
+					UserID = PropertyVals.SearchForProperty(ContractAccess_DefID).TypedValue.GetValueAsLookups().Item(i).Item
+					AddedUsers_List.Add UserID
+				Next
+			End If
+		End IF
+	End If
+End Function
+
+
+' USES THE MFILES API TO ADD THE USERS TO THE USER GROUP IF THEY ARE NOT ALREADY IN THE GROUP 
+public function AddUsersToGroup()
+	if AddedUsers_List.Count > 0 Then
+		For j = 1 To AddedUsers_List.Count Step 1
+			if vault.UserGroupOperations.GetUserGroup(GuestGroupID).Members.IndexOf(AddedUsers_List(j-1)) = -1 Then
+				vault.UserOperationsEx.AddMemberToUserGroup GuestGroupID, AddedUsers_List(j-1)
+			end if 
+		Next
+	End If
+End Function
+
+' IF THE USER HAS BEEN REMOVED FROM THE METADATA CARD OF THE CURRENT OBJECT, IT CHECKS IF THE USER STILL NEEDS ACCESS TO THE USERGROUP
+' BY SEARCHING IF THERE ARE ANY OTHER CONTRACT FOLDER CLASS OBJECTS THAT HAVE THE SPECIFIC USER IN THE CONTRACT ACCESS ATTRIBUTE. 
+public function RemoveUsersFromGroup()
+
+	'Err.Raise MFScriptCancel, RemovedUsers_List.Count
+	For i = 1 To RemovedUsers_List.Count Step 1
+		If(GetCountOfFolderAccess(RemovedUsers_List(i-1)) < 1 ) Then 
+			if vault.UserGroupOperations.GetUserGroup(GuestGroupID).Members.IndexOf(RemovedUsers_List(i-1)) <> -1 Then
+				vault.UserOperationsEx.RemoveMemberFromUserGroup GuestGroupID, RemovedUsers_List(i-1)
+			End if
+		End If
+	Next
+End Function
+
+
+' RETURNS THE COUNT OF CONTRACT FOLDERS THAT THE SPECIFIED USER HAS ACCESS TO 
+public function GetCountOfFolderAccess(UserID)
+	Dim serachResults : Set serachResults = SearchForObjectsWithSelectedVlItem(ContractFolder_Class_DefID, ContractAccess_DefID, UserID)
+	GetCountOfFolderAccess = serachResults.Count
+End Function
+
+
+' CONDUCTS A SEARCH FOR ALL CONTRACT FOLDERS THAT HAVE A CONTRACT ACCESS PROPERTY WHICH HAS THE SPECIFIED USER AS ONE OF THE VALUES.
+' RETURNS THE SEARCH RESULTS FROM THE EXECUTED SEARCH.  
+' CLASS ID = DEF ID OF THE CLASS ( CONTRACT FOLDER)
+' PROPERTY ID = DEF ID OF PROPERTY ( CONTRACT ACCESS)
+' PROPERTY VALUE = USER ID OF THE SPECIFIC USER. 
+public function SearchForObjectsWithSelectedVlItem(ClassId, PropID, PropValue)
+
+	Dim oSearchConditions : Set oSearchConditions = CreateObject("MFilesAPI.SearchConditions")
+	Dim oClassSearchCondition : Set oClassSearchCondition = GetSearchConditionForLookupByID(Class_DefID, ClassId)
+	oSearchConditions.Add -1, oClassSearchCondition
+	
+	Dim oUserSearchCondition : Set oUserSearchCondition = GetSearchConditionForLookupByID(PropID, PropValue)
+	oSearchConditions.Add -1, oUserSearchCondition
+
+	' RUN THE SEARCH.
+	Dim oSearchResults : set oSearchResults = Vault.ObjectSearchOperations.SearchForObjectsByConditions(oSearchConditions, 0, false)
+	Set SearchForObjectsWithSelectedVlItem = oSearchResults
+End Function
+
+
+
+'CREATES A SEARCH CONDITION FOR A LOOKUP WITH A SPECIFIC LOOKUP ID 
+public Function GetSearchConditionForLookupByID(PropertyDefID, lookupInternalId)
+	
+	' Create a lookup with the specific lookup item id 
+	Dim oLookup : Set oLookup = CreateObject("MFilesAPI.Lookup")
+	oLookup.Item = lookupInternalId
+
+	' Define the search condition.'
+	Dim oSearchCondition : Set oSearchCondition = CreateObject("MFilesAPI.SearchCondition")
+	oSearchCondition.Expression.SetPropertyValueExpression PropertyDefID, MFParentChildBehaviorNone, Nothing
+	oSearchCondition.ConditionType = 1
+	'oSearchCondition.TypedValue = oPropertyValue
+	oSearchCondition.TypedValue.SetValueToLookup(oLookup)
+
+	' Return the search condition.'
+	Set GetSearchConditionForLookupByID = oSearchCondition
+
+End Function

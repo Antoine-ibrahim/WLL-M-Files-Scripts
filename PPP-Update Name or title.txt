@@ -1,0 +1,96 @@
+'''GOAL: THIS SCRIPT TRIGGERS FOR THE "PLANS, POLICIES, AND PROCEDURES" CLASS. IT WILL UPDATE THE NAME OR TITLE FIELD AND THE ORIGINAL FILE NAME
+'''
+'''CREATED BY : ANTOINE IBRAHIM
+'''VERSION : 1.1: Added Prospect to checklist, and added logic to only add DOFP if it has a value. 
+'''LAST MODIFIED: 12/03/2019
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+' GET THE DEF ID'S FOR ALL THE PROPERTIES OF INTEREST ON THE CURRENT METADTA CARD 
+Dim DocCategoryPPP_Defid : DocCategoryPPP_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.DocumentCategory-PPP")
+Dim DocTypePPP_DefID : DocTypePPP_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.DocumentType-PPP")
+Dim DocDate_Defid : DocDate_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.DocumentDate")
+Dim DocTitle_Defid : DocTitle_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.DocumentTitle")
+Dim EhsPortfolioNmae_Defid : EhsPortfolioNmae_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.EHS-Portfolio")
+Dim OriginalFileName_DefID : OriginalFileName_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.OriginalFileName")
+
+' GET THE DEF ID'S FOR THE CLASSES OF INTEREST (DIGITAL WELL FILES)
+Dim PPP_Class_DefID : PPP_Class_DefID = Vault.ClassOperations.GetObjectClassIDByAlias( "Class.Document.PlansPoliciesProcedures" )
+Const Class_DefID = 100
+Dim NewDocName : NewDocName = ""
+Dim isNameEmpty : isNameEmpty = true 
+' Get the properties of the object.
+dim PropertyVals : set PropertyVals = Vault.ObjectPropertyOperations.GetProperties( ObjVer, false )
+
+
+Dim CurrentClass_DefID : CurrentClass_DefID =Vault.ObjectPropertyOperations.GetProperty( ObjVer, Class_DefID ).Value.GetLookupID()
+' IF THE CLASS OF THE CURRENT OBJECT BEING CHECKDED IS "PLANS, POLICIES, AND PROCEDURES" CONTINUE WITH FUNCTIONALITY 
+If (CurrentClass_DefID = PPP_Class_DefID ) Then
+	
+	' GET THE DOCUMENT TYPE -PPP OF THE OBJECT 
+	IF PropertyVals.IndexOf(DocTypePPP_DefID) > -1 Then
+		Dim DocTypeVal : DocTypeVal = PropertyVals.SearchForProperty(DocTypePPP_DefID).Value.DisplayValue
+		'GENERATE THE NEW DOC NAME BASED ON WHAT DOC TYPE IT IS 
+		IF DocTypeVal = "WELL SERVICING RECOMMENDED PRACTICE" Then 
+			NewDocName = GetValtoAppend(DocTitle_Defid,70) + "_WSRP"+ GetValtoAppend(DocCategoryPPP_Defid,-1) + Replace(GetValtoAppend(DocDate_Defid,-1),"/","-")
+		elseif InStr(UCase(DocTypeVal), "SPCC")> 0  Then
+			NewDocName = Replace(GetValtoAppend(EhsPortfolioNmae_Defid,-1),"/"," ") + GetValtoAppend(DocTypePPP_DefID,-1)+ GetValtoAppend(DocCategoryPPP_Defid,-1) + Replace(GetValtoAppend(DocDate_Defid,-1),"/","-")
+		Else
+			NewDocName = GetValtoAppend(DocTitle_Defid,50) + GetValtoAppend(DocTypePPP_DefID,-1)+ GetValtoAppend(DocCategoryPPP_Defid,-1) + Replace(GetValtoAppend(DocDate_Defid,-1),"/","-")
+		End if 
+	End IF
+
+	Dim NameOrTitle : NameOrTitle = "" 
+	' IF THE NAME OR TITLE PROPERTY IS ON THE METADATA CARD, THEN PROCEDE 
+	IF PropertyVals.IndexOf(0) > -1 Then
+		NameOrTitle= PropertyVals.SearchForProperty(0).Value.DisplayValue
+		dim NameOrTitleProp : set NameOrTitleProp = PropertyVals.SearchForProperty(0)
+		
+		' IF THE ORIGINAL FILE NAME EXISTS AND IS NULL/EMPTY, UPDATE ITS VALUE WITH THE NAME OR TITLE FIELD. 
+		IF PropertyVals.IndexOf(OriginalFileName_DefID) > -1  Then
+			if (PropertyVals.SearchForProperty(OriginalFileName_DefID).Value.DisplayValue="") then 				
+				dim OriginalFileNameProp : set OriginalFileNameProp = PropertyVals.SearchForProperty(OriginalFileName_DefID)
+				OriginalFileNameProp.Value.SetValue MFDatatypeText, NameOrTitle
+				Vault.ObjectPropertyOperations.SetProperty ObjVer, OriginalFileNameProp
+			end if 
+		End IF 	
+		
+		' UPDATE THE NAME OR TITLE FIELD WITH THE NEWDOCNAME 
+		NameOrTitleProp.Value.SetValue MFDatatypeText, NewDocName
+		Vault.ObjectPropertyOperations.SetProperty ObjVer, NameOrTitleProp
+	End IF 	
+	
+	'MAKE SURE THE MODIFIED BY USER, US THE CURRENT USER 
+	Const ModifiedBy = 23
+	Dim lastModifiedVal : Set lastModifiedVal = CreateObject("MFilesAPI.TypedValue")
+	lastModifiedVal.Value = Now
+	Dim SetModifiedToCurrentUser : set SetModifiedToCurrentUser =Vault.ObjectPropertyOperations.SetLastModificationInfoAdmin (ObjVer, True, PropertyVals.SearchForProperty(ModifiedBy).Value , True, lastModifiedVal)
+End If
+
+'============================================='
+'============= HELPER FUNCTIONS =============='
+'============================================='
+
+' THIS FUNCTION TAKES IN A DATA ID AND A LENGTH AND RETURNS VALUE THAT NEEDS TO BE APPENDED TO THE NAME OR TITLE FIELD 
+public Function GetValtoAppend(PropIdOfInterest, length)
+	Dim ValueToAppend : ValueToAppend =  ""
+	IF PropertyVals.IndexOf(PropIdOfInterest) > -1 Then
+		Dim valueOfProp : valueOfProp = PropertyVals.SearchForProperty(PropIdOfInterest).Value.DisplayValue
+		IF valueOfProp <> "" Then 
+			if (length >1 ) then 
+				If isNameEmpty = false Then
+					ValueToAppend = "_"+ Mid(valueOfProp, 1, length)
+				Else
+					ValueToAppend = Mid(valueOfProp, 1, length)
+				End If
+			else 
+				If isNameEmpty = false Then
+					ValueToAppend = "_"+ valueOfProp
+				Else
+					ValueToAppend = valueOfProp
+				End If
+			end if 
+			isNameEmpty= false
+		End if	
+	End IF 	
+	GetValtoAppend = ValueToAppend
+End Function

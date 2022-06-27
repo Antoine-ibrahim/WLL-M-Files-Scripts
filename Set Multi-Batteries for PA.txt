@@ -1,0 +1,121 @@
+'''GOAL: THIS CODE IS USED TO UPDATE THE PRODUCTION ACCOUNTING METADATA CARD FOR THE GAUGE SHEETS AND WILL 
+''' GRAB THE BATTERIES IN THE DATABASE AND ADD THEM TO THE MULTISELECT LIST FOR THE BATTERIES MULTI FIELD 
+'''
+'''CREATED BY : ANTOINE IBRAHIM
+'''VERSION : 1.0
+'''Version : 2.0 removed DB query and did MF search to retrieve the batteries
+'''LAST MODIFIED: 11/23/2020
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Const Class_DefID =100
+Const ModifiedBy = 23
+
+'SET ALL DEF IDS FOR PROPERTIES AND CLASSES WE NEED WE NEED
+Dim ProdAcc_Class_DefID : ProdAcc_Class_DefID = Vault.ClassOperations.GetObjectClassIDByAlias( "Class.Document.ProductionAccounting" )
+Dim DocTypePA_Defid : DocTypePA_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.DocumentType-PA.single")
+Dim Merrick_Defid : Merrick_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.MerrickID.Single")
+Dim Entity_Defid : Entity_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.EntityID.Single")
+Dim BatteryMulti_Defid : BatteryMulti_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.Batteries.Multi")
+Dim BatterySingle_Defid : BatterySingle_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.Battery.Single")
+Dim BatteryStatus_Defid : BatteryStatus_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.BatteryStatus")
+
+Dim Battery_Class_DefId : Battery_Class_DefId = Vault.ClassOperations.GetObjectClassIDByAlias( "Class.Battery" ) 
+Dim BatteryVL_DefId : BatteryVL_DefId = Vault.ValueListOperations.GetValueListIDByAlias("VL.SubmittalType")
+
+'GET CURRENT CLASS
+Dim CurrentClass_DefID : CurrentClass_DefID = Vault.ObjectPropertyOperations.GetProperty( ObjVer, Class_DefID ).Value.GetLookupID()
+Dim BatteryArrayList : Set BatteryArrayList = CreateObject("System.Collections.ArrayList")
+
+' GET PROPERTY VALUES FOR THE CURRENT OBJECT
+Dim PropertyVals : set PropertyVals = Vault.ObjectPropertyOperations.GetProperties( ObjVer, false )
+
+'IF THE CLASS OF THE CURRENT OBJECT IS "PRODUCTION ACCOUNTING" AND THE BATTERY-MULTI PROPERTY EXISTS, AND DOCTYPE EXIST THEN CONTINUE 
+If (CurrentClass_DefID = ProdAcc_Class_DefID AND BatteryMulti_Defid > 0 AND DocTypePA_Defid > 0) Then '1
+	'PROCEED ONLY IF THE DOCUMENT TYPE PROPERTY EXISTS 
+	If (PropertyVals.IndexOf(DocTypePA_Defid) > 0 ) Then
+		'GET THE VALUE OF THE DOCUMENT TYPE
+		Dim DocTypePA_Value : DocTypePA_Value = propertyValues.SearchForProperty(DocTypePA_Defid).Value.DisplayValue
+		'CREATE THE PROPERTY VALUE THAT WILL BE ADDED TO THE METADATA CARD
+		Dim MultiBat_PropVal  : Set MultiBat_PropVal  = CreateObject("MFilesAPI.PropertyValue")
+		MultiBat_PropVal.PropertyDef = BatteryMulti_Defid	
+		' IF THE DOCUMENT TYPE IS GAUGE SHEET THEN GET THE APPROPRIATE BATTERIES FROM THE DB
+		If (DocTypePA_Value = "Gauge Sheets" OR DocTypePA_Value = "Misc") Then	
+			
+			getActiveBatteries()
+			'SET THE MULTI-BATTERY PROPERTY VALUE
+			MultiBat_PropVal.Value.SetValue MFDatatypeMultiSelectLookup, BatteryArrayList.ToArray()
+			Vault.ObjectPropertyOperations.SetProperty ObjVer, MultiBat_PropVal
+		Else
+			' IF THE DOCUMENT TYPE IS NOT GAUGE SHEET OR MISC THEN SET THE MULTI-BATTERY PROPERTY TO EQUAL THE SINGLE-BATTERY PROPERTY
+			If (PropertyVals.IndexOf(BatterySingle_Defid) > 0 And propertyValues.SearchForProperty(BatterySingle_Defid).Value.DisplayValue <> "") Then
+				Dim BatteryID : BatteryID = PropertyVals.SearchForProperty(BatterySingle_Defid).TypedValue.GetValueAsLookup().Item
+				BatteryArrayList.Add(BatteryID)
+				'SET THE MULTI-BATTERY PROPERTY VALUE
+				MultiBat_PropVal.Value.SetValue MFDatatypeMultiSelectLookup, BatteryArrayList.ToArray()
+				Vault.ObjectPropertyOperations.SetProperty ObjVer, MultiBat_PropVal
+			End If			
+		End If
+		
+		'MAKE SURE THE LAST MODIFIED BY VALUE STAYS THE SAME (EQUAL TO CURRENT USER) 
+		Dim lastModifiedVal : Set lastModifiedVal = CreateObject("MFilesAPI.TypedValue")
+		lastModifiedVal.Value = Now
+		Dim someBs : set someBs =Vault.ObjectPropertyOperations.SetLastModificationInfoAdmin (ObjVer, True, PropertyVals.SearchForProperty(ModifiedBy).Value , True, lastModifiedVal)
+	
+	End If
+End If
+
+
+'============================================='
+'============= HELPER FUNCTIONS =============='
+'============================================='
+
+
+'helper function that takes in a valuelist def id and a value, and returns the id of the item in the value list
+Function getActiveBatteries()
+		
+	'class search condition
+	Dim oSearchConditions : Set oSearchConditions = CreateObject("MFilesAPI.SearchConditions")
+	Dim oClassSearchCondition : Set oClassSearchCondition = GetSearchConditionForLookupByID(100, Battery_Class_DefId)
+	oSearchConditions.Add -1, oClassSearchCondition
+
+	'Battery Status search condition
+	Dim oStatusCondition : Set oStatusCondition = CreateObject("MFilesAPI.SearchCondition")
+	oStatusCondition.Expression.SetPropertyValueExpression BatteryStatus_Defid, MFParentChildBehaviorNone, Nothing
+	oStatusCondition.ConditionType = MFConditionTypeEqual 
+	oStatusCondition.TypedValue.SetValue MFDatatypeText, "Active"
+	oSearchConditions.Add -1, oStatusCondition 	
+
+	'get only non deleted items
+	Dim NotDeletedCondition : Set NotDeletedCondition = CreateObject("MFilesAPI.SearchCondition")
+	NotDeletedCondition.Expression.SetStatusValueExpression MFStatusTypeDeleted, Nothing
+	NotDeletedCondition.ConditionType = MFConditionTypeEqual
+	NotDeletedCondition.TypedValue.SetValue MFDatatypeBoolean, false	
+	oSearchConditions.Add -1, NotDeletedCondition
+
+	Dim oSearchResults : set oSearchResults = Vault.ObjectSearchOperations.SearchForObjectsByConditionsEx(oSearchConditions, 0, false, 0,60)
+											  
+	For Each result in oSearchResults
+		BatteryArrayList.Add(result.ObjVer.ID)
+	Next
+	
+End Function
+
+
+
+'CREATES A SEARCH CONDITION FOR A LOOKUP WITH A SPECIFIC LOOKUP ID 
+public Function GetSearchConditionForLookupByID(PropertyDefID, lookupInternalId)
+	
+	' Create a lookup referencing this class ID.
+	Dim oClassLookup : Set oClassLookup = CreateObject("MFilesAPI.Lookup")
+	oClassLookup.Item = lookupInternalId
+
+	' Define the search condition.'
+	Dim oSearchCondition : Set oSearchCondition = CreateObject("MFilesAPI.SearchCondition")
+	oSearchCondition.Expression.SetPropertyValueExpression PropertyDefID, MFParentChildBehaviorNone, Nothing
+	oSearchCondition.ConditionType = 1
+	'oSearchCondition.TypedValue = oPropertyValue
+	oSearchCondition.TypedValue.SetValueToLookup(oClassLookup)
+
+	' Return the search condition.'
+	Set GetSearchConditionForLookupByID = oSearchCondition
+
+End Function

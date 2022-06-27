@@ -1,0 +1,79 @@
+'''GOAL: THIS CODE ADDS THE INDEX DATE PROPERTY TO EACH DOCUMENT OBJECT AS IT IS CREATED IN THE VAULT, TO TRACK THE DATE
+''' THAT THE ITEM WAS ADDED INTO M-FILES, AND NOT THE SYSTEM DATE THAT THE DOCUMENT WAS CREATED. 
+'''CREATED BY : ANTOINE IBRAHIM
+'''VERSION : 1.2 : updated original script to exclued land files sd and BC files for migration
+'''VERSION :1.3 : Added script provided by zachary wick (Mfiles) to keep modified by user. line 38 42 
+'''LAST MODIFIED: 09/5/2019
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+' GET THE IDS FOR THE VARIABLES THAT WE NEED 
+Const Document_Object_ID = 0
+Dim IndexDate_DefID : IndexDate_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.IndexDate.timestamp")
+'	Err.Raise MFScriptCancel, DateTime.UtcNow
+
+Set dateTime = CreateObject("WbemScripting.SWbemDateTime")    
+dateTime.SetVarDate (now())
+
+'ignoring land files from SD and BC migrations,
+Dim LandFiles_Class_DefID : LandFiles_Class_DefID = Vault.ClassOperations.GetObjectClassIDByAlias( "Class.Document.LandFiles" )
+Const Class_DefID = 100
+Dim CurrentClass_DefID : CurrentClass_DefID = Vault.ObjectPropertyOperations.GetProperty( ObjVer, Class_DefID ).Value.GetLookupID()
+Dim Source_DefID : Source_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.Source")
+Dim Source_Value : Source_Value = ""
+Dim PropertyVals : set PropertyVals = Vault.ObjectPropertyOperations.GetProperties( ObjVer, false ) 
+
+'end of added for facilities
+
+IF PropertyVals.IndexOf(Source_DefID) >-1 then 
+	Source_Value = PropertyVals.SearchForProperty(Source_DefID).Value.DisplayValue
+End If
+
+'IF THE CURRENT OBJECT IS A DOCUMENT THEN PROCEDE WITH ADDING THE INDEX DATE TO THE METADATA CARD
+IF(ObjVer.Type =Document_Object_ID) THEN
+	If NOT(CurrentClass_DefID = LandFiles_Class_DefID And (Source_Value = "SD" or Source_Value ="BC")) Then 'added for facility
+		if (IndexDate_DefID > -1)Then
+	
+			Dim oIndexDateTimeProperty : Set oIndexDateTimeProperty = CreatePropertyValueByDefID(IndexDate_DefID, "MFDatatypeTimestamp", dateTime.GetVarDate (false) )
+			vault.ObjectPropertyOperations.SetProperty ObjVer, oIndexDateTimeProperty
+			'MAKE SURE THE MODIFIED BY USER, US THE CURRENT USER 
+			Const ModifiedBy = 23
+			Dim lastModifiedVal : Set lastModifiedVal = CreateObject("MFilesAPI.TypedValue")
+			lastModifiedVal.Value = Now
+			Dim SetModifiedToCurrentUser : set SetModifiedToCurrentUser =Vault.ObjectPropertyOperations.SetLastModificationInfoAdmin (ObjVer, True, PropertyVals.SearchForProperty(ModifiedBy).Value , True, lastModifiedVal)
+		End if 
+	End if 
+END IF
+
+'''''''''''''''''''''''''''''''''''''''''''''HELPER FUNCTIONS'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+'CREATES A PROPERTY VALUE OBJECT AND SETS ITS VALUE, USED TO CREATE INDEX DATE PROPERTY
+public Function CreatePropertyValueByDefID(PropertyDefID, propDataType, oPropertyValue)
+'	GET THE PROPERTY THAT NEEDS TO BE UPDATED
+	Dim oPropertyValueCondition : Set oPropertyValueCondition = CreateObject("MFilesAPI.PropertyValue")
+		oPropertyValueCondition.PropertyDef = PropertyDefID
+		if (propDataType ="MFDatatypeDate") then 
+			if (oPropertyValue ="") then 
+				oPropertyValueCondition.Value.SetValue MFDatatypeDate, Null
+			else
+				oPropertyValueCondition.Value.SetValue MFDatatypeDate, oPropertyValue
+			end if
+		end if 
+
+		if (propDataType ="MFDatatypeText") then 
+			if (oPropertyValue ="") then 
+				oPropertyValueCondition.Value.SetValue MFDatatypeText, Null
+			else
+				oPropertyValueCondition.Value.SetValue MFDatatypeText, oPropertyValue
+			end if
+		end if 
+
+		if (propDataType ="MFDatatypeTimestamp") then 
+			if (oPropertyValue ="") then 
+				oPropertyValueCondition.Value.SetValue MFDatatypeText, Null
+			else
+				oPropertyValueCondition.Value.SetValue MFDatatypeTimestamp, oPropertyValue
+			end if
+		end if 
+	' Return the propertyValue condition.'
+	Set CreatePropertyValueByDefID = oPropertyValueCondition 
+End Function

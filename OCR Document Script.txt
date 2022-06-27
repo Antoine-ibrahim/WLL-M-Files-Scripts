@@ -1,0 +1,30 @@
+Option Explicit
+
+' Prepare the files of the object for modification by script.
+Dim files
+Set files = Vault.ObjectFileOperations.GetFilesForModificationInEventHandler( ObjVer )
+
+' Prepare OCR options.
+Dim opts
+Set opts = CreateObject( "MFilesAPI.OCROptions" )
+opts.PrimaryLanguage = MFOCRLanguageEnglishUS
+opts.SecondaryLanguage = MFOCRLanguageFinnish
+
+' Perform OCR on each of the convertible files.
+Dim file
+For Each file In files
+
+    ' Is the file in a convertible file format?
+    If  file.Extension = "tif" Or _
+        file.Extension = "tiff" Or _
+        file.Extension = "jpg" Or _
+        file.Extension = "jpeg" Or _
+        file.Extension = "pdf" Then
+
+        ' Convert this file to searchable PDF.
+        Vault.ObjectFileOperations.PerformOCROperation ObjVer, file.FileVer, _
+                opts, MFOCRZoneRecognitionModeNoZoneRecognition, Nothing, True
+
+    End If
+
+Next

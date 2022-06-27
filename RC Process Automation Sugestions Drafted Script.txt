@@ -1,0 +1,154 @@
+'''GOAL: THIS SCRIPT TRIGGERS ON THE SUGGESTIONS DRAFTED STEP OF THE RC RULES CONFIRMATION WORKFLOW. THIS WORKFLOW IS ONLY USED ON A SPECIFIC OBJECT 
+''' THE "RC PROCESS AUTOMATION CHECKLIST". THE SCRIPT FIRST SEARCHES THE VAULT TO SEE IF THERE IS ANY WELL RULES SPECIFIED FOR THE SELECTED AGENCY. 
+''' THE WELL RULES SPECIFY WHICH WORKFLOWS NEED TO BE INITIATED FOR THE SPECIFIC SELECTED AGENCY IN A MULTISELECT LIST. UPON REACHING THIS WF STEP
+''' AND RETRIEVING THE WELL RULE TO DETERMINE WHAT WORKFLOWS NEED TO BE INITIATED, THE SCRIPT THEN ELIMINATES WORKFLOWS FROM THE LIST BASED IF CERTAIN  
+'''CRITERIA ARE NOT MET FOR THAT WF. AFTER GETTING A FULL LIST OF WF THE SCRIPT THEN POPULATES THE MULTIVALUE PROPERTY "CHOOSE WORKFLOW" WITH AN UPDATED LIST. 
+'''
+'''CREATED BY : ANTOINE IBRAHIM
+'''VERSION : 1.0
+'''LAST MODIFIED: 08/21/2019
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+Dim RcToProcess_List : Set RcToProcess_List = CreateObject("Scripting.Dictionary")
+'Dim Full_RC_Dictionary : Set Full_RC_Dictionary = CreateObject("Scripting.Dictionary")
+
+Dim Agency_DefID : Agency_DefID =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.Agency")
+Dim WFMulti_DefID : WFMulti_DefID =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.ChooseWorkflowMulti")
+
+'GET THE PROPERTY VALUES FOR THE CURRENT AND LAST VERSION 
+Dim PropertyVals : set PropertyVals = Vault.ObjectPropertyOperations.GetProperties( ObjVer, false ) 
+
+'Get defids for classes and properties we are interested in (missive properties)
+Dim Rules_Class_DefID : Rules_Class_DefID = Vault.ClassOperations.GetObjectClassIDByAlias( "Class.Obj.RCProcessAutomationRules" )
+
+'THE SCRIPT INITIATES ONLY IF THERE IS AN AGENCY SELECTED
+
+IF PropertyVals.IndexOf(Agency_DefID) > -1 then 
+	Dim agency_ID : agency_ID = PropertyVals.SearchForProperty(Agency_DefID).Value.GetLookupID()
+	' IT SEARCHES THE VAULT TO SEE IF THERE IS A WELL RULES OBJECT FOR THAT AGENCY
+	Dim wellRules : Set wellRules = SearchForWellRules(agency_ID)
+	' IF A WELL RULE EXISTS , GRAB THE LIST OF WF'S FROM THE CHOOSE WF PROPERTY. 
+	IF (wellRules.Count > 0) Then 
+		Dim Rule : Set Rule =  Vault.ObjectOperations.GetObjectVersionAndProperties(wellRules(1).ObjVer, false)
+		Dim RuleProps :  Set RuleProps = Rule.Properties
+		Dim NumOfWfs : NumOfWfs = RuleProps.SearchForProperty(WFMulti_DefID).TypedValue.GetValueAsLookups().Count
+		' ADD ALL THE WF'S TO THE DICTIONARY kEY: WF NAMES VALUE: WF IDS 
+		If(NumOfWfs > 0 ) Then 
+			For i = 1 To NumOfWfs Step 1
+				Dim wfName : wfName = RuleProps.SearchForProperty(WFMulti_DefID).TypedValue.GetValueAsLookups().Item(i).DisplayValue
+				Dim wfID : wfID = RuleProps.SearchForProperty(WFMulti_DefID).TypedValue.GetValueAsLookups().Item(i).Item
+				RcToProcess_List.Add wfName, wfID
+			Next
+		End If
+		' CALL THE FUNCTION TO FILTER THE LIST OF NECESSARY WFS IF CRITERIA ARE NOT MET. 
+		UpdateDictionaryFromRules
+		
+		Dim oPropertyValueCondition : Set oPropertyValueCondition = CreateObject("MFilesAPI.PropertyValue")
+		oPropertyValueCondition.PropertyDef = WFMulti_DefID
+
+		' UPDATE THE CHOOSE WF PROPERTY WITH THE CORRECT SUGGESTED LIST OF WORKFLOWS 
+		oPropertyValueCondition.Value.SetValue MFDatatypeMultiSelectLookup, RcToProcess_List.Items
+		vault.ObjectPropertyOperations.SetProperty ObjVer, oPropertyValueCondition
+	End IF
+End IF
+
+' THIS FUNCTION UPDATES THE LIST OF WORKFLOWS TO GET THE SUGGESTED LIST OF WORKFLOWS THAT NEED TO BE INITIATED 
+' FOR A SPECIFIC AGENCY
+Function UpdateDictionaryFromRules
+	Dim Federal_DefID : Federal_DefID =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.Federal.Q")
+	Dim Comingle_DefID : Comingle_DefID =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.Commingled.Q")
+	Dim FracStr_DefID : FracStr_DefID =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.FracString.Q")
+	Dim EngCReq_DefID : EngCReq_DefID =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.EngineerConfidentialityRequest.Q")
+	Dim WellGasCon_DefID : WellGasCon_DefID =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.WellGasConnection.Q")
+	Dim ExceedFlare_DefID : ExceedFlare_DefID =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.ExceedFlaringLimit.Q")
+	Dim thirdParty_DefID : thirdParty_DefID =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.3rdPartyFiled.Q")
+	Dim SharingLact_DefID : SharingLact_DefID =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.RC - Non-commingled Wells Sharing LACT.Q")
+
+	If GetPropertyValue(Federal_DefID) <> "Yes" Then 
+		RemoveDictionaryKey "First Production Notice"
+		RemoveDictionaryKey "BLM Completion Report"
+	End If
+
+	If GetPropertyValue(Comingle_DefID) <> "Yes" Then 
+		RemoveDictionaryKey "Commingle Sundry"
+	End If
+
+	If GetPropertyValue(FracStr_DefID) <> "No" Then 
+		RemoveDictionaryKey "Flow Up Casing Notice"
+	End If
+
+	If GetPropertyValue(EngCReq_DefID) <> "Yes" Then 
+		RemoveDictionaryKey "Confidentiality Request"
+	End If
+
+	If GetPropertyValue(Agency_DefID) = "COGCC" and GetPropertyValue(WellGasCon_DefID) <> "No" Then 
+		RemoveDictionaryKey "Flare Gas Sundry"
+	End If
+
+	If GetPropertyValue(Agency_DefID) = "MBOGC" and (GetPropertyValue(WellGasCon_DefID) <> "No" or GetPropertyValue(ExceedFlare_DefID) <> "Yes") Then 
+		RemoveDictionaryKey "Flare Gas Sundry"
+	End If
+
+	If GetPropertyValue(thirdParty_DefID) <> "No" Then 
+		RemoveDictionaryKey "LACT Install/Removal"
+	End If
+
+	If GetPropertyValue(SharingLact_DefID) <> "Yes" Then 
+		RemoveDictionaryKey "Shared LACT Sundry"
+	End If
+		
+End Function
+
+
+'THIS FUNCTION SEARCHES FOR THE ASSIGED TO USER'S PROFILE
+Function SearchForWellRules(selectedAgency)
+	'CREATE A SEARCH CONDITION FOR THE CHECKLIST CLASS, AND SELECTED WELL 		
+	Dim oSearchConditions : Set oSearchConditions = CreateObject("MFilesAPI.SearchConditions")
+	Dim oClassSearchCondition : Set oClassSearchCondition = GetSearchConditionForLookupByID(100, Rules_Class_DefID)
+	oSearchConditions.Add -1, oClassSearchCondition
+
+	Dim oAgencySearchCondition : Set oAgencySearchCondition = GetSearchConditionForLookupByID(Agency_DefID, selectedAgency)
+	oSearchConditions.Add -1, oAgencySearchCondition
+		
+	' RUN THE SEARCH.
+	Dim oSearchResults : set oSearchResults = Vault.ObjectSearchOperations.SearchForObjectsByConditions(oSearchConditions, 0, false)
+	Set SearchForWellRules = oSearchResults
+End Function
+
+
+'CREATES A SEARCH CONDITION FOR A LOOKUP WITH A SPECIFIC LOOKUP ID 
+public Function GetSearchConditionForLookupByID(PropertyDefID, lookupInternalId)
+	
+	' Create a lookup referencing this class ID.
+	Dim oClassLookup : Set oClassLookup = CreateObject("MFilesAPI.Lookup")
+	oClassLookup.Item = lookupInternalId
+
+	' Define the search condition.'
+	Dim oSearchCondition : Set oSearchCondition = CreateObject("MFilesAPI.SearchCondition")
+	oSearchCondition.Expression.SetPropertyValueExpression PropertyDefID, MFParentChildBehaviorNone, Nothing
+	oSearchCondition.ConditionType = 1
+	'oSearchCondition.TypedValue = oPropertyValue
+	oSearchCondition.TypedValue.SetValueToLookup(oClassLookup)
+
+	' Return the search condition.'
+	Set GetSearchConditionForLookupByID = oSearchCondition
+
+End Function
+
+' GETS THE DISPLAY VALUE OF THE SPECIFIED PROPERTY DEF ID 
+public Function GetPropertyValue (propID)
+	Dim propValue : propValue = "" 
+
+	IF PropertyVals.IndexOf(propID) > -1 Then
+		propValue = PropertyVals.SearchForProperty(propID).Value.DisplayValue
+	End IF 	
+	GetPropertyValue = propValue
+End Function
+
+
+public Function RemoveDictionaryKey (KeyName)
+	If RcToProcess_List.Exists(KeyName) Then 
+		RcToProcess_List.Remove KeyName
+	End IF 	
+End Function
+

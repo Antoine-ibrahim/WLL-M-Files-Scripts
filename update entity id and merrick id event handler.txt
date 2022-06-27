@@ -1,0 +1,79 @@
+'''GOAL: THIS CODE IS USED TO UPDATE THE MERRICK ID AND ENTITY ID PROPERTIES RESPECTIVELY BY USING THE
+''' SELECTED BATTERY OR FACILITY OBJECTS ON THE METADATA CARD AND RETRIEVING THEIR VALUES. THEN 
+''' SETTING THEM ON THE CURRENT OBJECT BEING CHECKED IN
+'''
+'''CREATED BY : ANTOINE IBRAHIM
+'''VERSION : 1
+''' V1 NOTES: COMBINED AUTOMATIC VALUE SCRIPTS FOR ENTITY ID AND MERRIC ID INTO EVENT HANDLER 
+'''LAST MODIFIED: 08/29/2019
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+Option Explicit
+
+Const ModifiedBy = 23
+'Get the property definition id using the alias 
+Dim BatteryProperty_Defid : BatteryProperty_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.Battery.Single")
+Dim Facilty_Defid : Facilty_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.Facility")
+Dim EntityID_DefId : EntityID_DefId = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.EntityID.Single")
+Dim MerricID_DefId : MerricID_DefId = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.MerrickID.Single")
+Dim FacilityID_DefId : FacilityID_DefId = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.FacilityID.List")
+
+'GET THE PROPERTY VALUES FOR THE CURRENT AND LAST VERSION 
+Dim PropertyVals : set PropertyVals = Vault.ObjectPropertyOperations.GetProperties( ObjVer, false ) 
+
+'get the current class
+Dim CurrentClass : CurrentClass = PropertyVals.SearchForProperty(100).Value.DisplayValue
+
+' if the class is Production Accounting then set both entity and Merrick id 
+if (CurrentClass ="Production Accounting"  OR CurrentClass ="Facilities Records" ) Then
+	if (CurrentClass ="Production Accounting" And PropertyVals.IndexOf(BatteryProperty_Defid) > -1 ) Then
+		Dim BatteryValue : BatteryValue= PropertyVals.SearchForProperty(BatteryProperty_Defid).Value.DisplayValue
+		' if a battery is selected 
+		if (BatteryValue <> "") Then 
+			'get the selected battery object and its properties
+			Dim Battery_ObjVer : set Battery_ObjVer = PropertyVals.SearchForProperty(BatteryProperty_Defid).TypedValue.GetValueAsLookup().GetAsObjVer()
+			set Battery_ObjVer = vault.ObjectOperations.GetLatestObjVer(Battery_ObjVer.ObjID, true, false)
+			Dim Battery_objVerAndProps : set Battery_objVerAndProps =  Vault.ObjectOperations.GetObjectVersionAndProperties(Battery_ObjVer, false)	
+			Dim BatteryProperties : set BatteryProperties = Battery_objVerAndProps.Properties 
+			'set entity id, if exists
+			If BatteryProperties.IndexOf(EntityID_DefId) > -1 Then
+				dim EntityID_Prop : set EntityID_Prop = BatteryProperties.SearchForProperty( EntityID_DefId )
+				Vault.ObjectPropertyOperations.SetProperty ObjVer, EntityID_Prop
+			End if
+			'set Merrick id if exists
+			If BatteryProperties.IndexOf(MerricID_DefId) > -1 Then
+				dim MerricID_Prop : set MerricID_Prop = BatteryProperties.SearchForProperty( MerricID_DefId )
+				Vault.ObjectPropertyOperations.SetProperty ObjVer, MerricID_Prop
+			End if
+		End if
+	end if 
+	
+	' if the class is facility records then set the entity id 
+	If (CurrentClass ="Facilities Records" And PropertyVals.IndexOf(Facilty_Defid) > -1 ) Then
+		Dim FacValue : FacValue= PropertyVals.SearchForProperty(Facilty_Defid).Value.DisplayValue
+		' if there is a facility selected 
+		if (FacValue <> "") Then 
+			'get the selected battery object and its properties
+			Dim Facility_ObjVer : set Facility_ObjVer = PropertyVals.SearchForProperty(Facilty_Defid).TypedValue.GetValueAsLookup().GetAsObjVer()
+			set Facility_ObjVer = vault.ObjectOperations.GetLatestObjVer(Facility_ObjVer.ObjID, true, false)
+			Dim Facility_objVerAndProps : set Facility_objVerAndProps =  Vault.ObjectOperations.GetObjectVersionAndProperties(Facility_ObjVer, false)	
+			Dim FacilityProperties : set FacilityProperties = Facility_objVerAndProps.Properties
+			
+			'set entity id if exists
+			If FacilityProperties.IndexOf(EntityID_DefId) > -1 Then
+				dim EntityIDProp : set EntityIDProp = FacilityProperties.SearchForProperty( EntityID_DefId )
+				Vault.ObjectPropertyOperations.SetProperty ObjVer, EntityIDProp
+			End if
+	
+			If FacilityProperties.IndexOf(FacilityID_DefId) > -1 Then
+				dim FacIDProp : set FacIDProp = FacilityProperties.SearchForProperty( FacilityID_DefId )
+				Vault.ObjectPropertyOperations.SetProperty ObjVer, FacIDProp
+			End if
+		End if
+	End If
+
+	Dim lastModifiedVal : Set lastModifiedVal = CreateObject("MFilesAPI.TypedValue")
+	lastModifiedVal.Value = Now
+	Dim someBs : set someBs =Vault.ObjectPropertyOperations.SetLastModificationInfoAdmin (ObjVer, True, PropertyVals.SearchForProperty(ModifiedBy).Value , True, lastModifiedVal)
+END if
+

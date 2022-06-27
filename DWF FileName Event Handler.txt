@@ -1,0 +1,98 @@
+' GET THE DEF ID'S FOR ALL THE PROPERTIES OF INTEREST ON THE CURRENT METADTA CARD 
+Dim DocCategory_Defid : DocCategory_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.Category-DWF")
+Dim DocType_DefID : DocType_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.Type-DWF")
+Dim DocDate_DefID : DocDate_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.DocumentDate")
+Dim SpDocumentID_DefID : SpDocumentID_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.SPDocumentID")
+Dim OriginalFileName_DefID : OriginalFileName_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.OriginalFileName")
+Dim WellName_Defid : WellName_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.Well")
+Dim DwfDocumentName : DwfDocumentName = ""
+
+' Get the properties of the object.
+dim PropertyVals : set PropertyVals = Vault.ObjectPropertyOperations.GetProperties( ObjVer, false )
+
+
+' GET THE DEF ID'S FOR THE CLASSES OF INTEREST (DIGITAL WELL FILES)
+'Dim DWF_Class_DefID : DWF_Class_DefID = Vault.ClassOperations.GetObjectClassIDByAlias( "Class.Document.DigitalWellFile" )
+Dim DWF_Class_DefID : DWF_Class_DefID = Vault.ClassOperations.GetObjectClassIDByAlias( "Class.Document.DWFTest" )
+Const Class_DefID = 100
+
+' IF THE CLASS OF THE CURRENT OBJECT BEING CHECKDED IN RC PROCESS THEN CONTINUE WITH FUNCTIONALITY 
+If Vault.ObjectPropertyOperations.GetProperty( ObjVer, Class_DefID ).Value.GetLookupID() = DWF_Class_DefID Then
+
+	
+	'[WellNm] (39) +'_'+ [DocCat]  4 +'_'+ [DocType] (15)+'_'+ [DocDt] (10) +'_'+ [DocID]
+				'SET THE VALUE FOR THE SUBMITTAL DATE AND THE STATUS ONLY IF SUBMISSION DATE EXISTS AND HAS A VALUE
+	IF PropertyVals.IndexOf(WellName_Defid) > -1 Then
+		IF PropertyVals.SearchForProperty(WellName_Defid).Value.DisplayValue <> "" Then 
+			if PropertyVals.SearchForProperty(WellName_Defid).TypedValue.GetValueAsLookups().Count >1 Then
+				DwfDocumentName = "MultiWell"
+			else
+				DwfDocumentName = Mid(PropertyVals.SearchForProperty(WellName_Defid).Value.DisplayValue, 1, 39)
+			End if
+		End if 
+	End IF 	
+	
+	IF PropertyVals.IndexOf(DocCategory_Defid) > -1 Then
+		IF PropertyVals.SearchForProperty(DocCategory_Defid).Value.DisplayValue <> "" Then 
+			If DwfDocumentName <> "" Then
+				DwfDocumentName =DwfDocumentName +"_"+ Mid(PropertyVals.SearchForProperty(DocCategory_Defid).Value.DisplayValue, 1, 4)
+			Else
+				DwfDocumentName = Mid(PropertyVals.SearchForProperty(DocCategory_Defid).Value.DisplayValue, 1, 4)
+			End If
+		End if 
+	End IF 	
+	
+	IF PropertyVals.IndexOf(DocType_DefID) > -1 Then
+		IF PropertyVals.SearchForProperty(DocType_DefID).Value.DisplayValue <> "" Then 
+			If DwfDocumentName <> "" Then
+				DwfDocumentName =DwfDocumentName +"_"+ Mid(PropertyVals.SearchForProperty(DocType_DefID).Value.DisplayValue, 1, 15)
+			Else
+				DwfDocumentName = Mid(PropertyVals.SearchForProperty(DocType_DefID).Value.DisplayValue, 1, 15)
+			End If
+		End if 
+	End IF 	
+	
+	IF PropertyVals.IndexOf(DocDate_DefID) > -1 Then
+		IF PropertyVals.SearchForProperty(DocDate_DefID).Value.DisplayValue <> "" Then 
+			If DwfDocumentName <> "" Then
+				DwfDocumentName =DwfDocumentName +"_"+ Replace(PropertyVals.SearchForProperty(DocDate_DefID).Value.DisplayValue,"/","-")
+			Else
+				DwfDocumentName = Replace(PropertyVals.SearchForProperty(DocDate_DefID).Value.DisplayValue,"/","-")
+			End If
+		End if 
+	End IF 	
+	
+	
+	IF PropertyVals.IndexOf(SpDocumentID_DefID) > -1 Then
+		IF PropertyVals.SearchForProperty(SpDocumentID_DefID).Value.DisplayValue <> "" Then 
+			If DwfDocumentName <> "" Then
+				DwfDocumentName =DwfDocumentName +"_"+ PropertyVals.SearchForProperty(SpDocumentID_DefID).Value.DisplayValue 
+			Else
+				DwfDocumentName = PropertyVals.SearchForProperty(SpDocumentID_DefID).Value.DisplayValue 
+			End If
+		End if 
+	End IF 	
+	
+	
+	dim NameOrTitleIndex : NameOrTitleIndex = PropertyVals.IndexOf(0)
+	dim OriginalFileNameIndex : OriginalFileNameIndex = PropertyVals.IndexOf(OriginalFileName_DefID)
+		
+	' Get the current minor version.
+	
+	Dim NameOrTitle : NameOrTitle = "" 
+	
+	IF NameOrTitleIndex > -1 Then
+		NameOrTitle= PropertyVals.SearchForProperty(0).Value.DisplayValue
+		dim NameOrTitleProp : set NameOrTitleProp = PropertyVals( NameOrTitleIndex )
+	
+		IF OriginalFileNameIndex > -1 And PropertyVals.SearchForProperty(OriginalFileName_DefID).Value.DisplayValue="" Then
+			dim OriginalFileNameProp : set OriginalFileNameProp = PropertyVals( OriginalFileNameIndex )
+			OriginalFileNameProp.Value.SetValue MFDatatypeText, NameOrTitle
+			Vault.ObjectPropertyOperations.SetProperty ObjVer, OriginalFileNameProp
+		End IF 	
+	
+		NameOrTitleProp.Value.SetValue MFDatatypeText, DwfDocumentName
+		Vault.ObjectPropertyOperations.SetProperty ObjVer, NameOrTitleProp
+	End IF 	
+End IF 	
+'Err.Raise MFScriptCancel, DwfDocumentName & ", filename: " & NameOrTitle

@@ -1,0 +1,17 @@
+Option Explicit
+
+DIM DocDateValue : DocDateValue = PropertyValue.GetValueAsUnlocalizedText
+
+' GET THE DEF ID'S FOR THE CLASSES OF INTEREST (LAND FILES)
+Dim Landfile_Class_DefID : Landfile_Class_DefID = Vault.ClassOperations.GetObjectClassIDByAlias( "Class.Document.LandFiles" )
+Const Class_DefID = 100
+
+' IF THE CLASS OF THE CURRENT OBJECT BEING CHECKDED IN RC PROCESS THEN CONTINUE WITH FUNCTIONALITY 
+If Vault.ObjectPropertyOperations.GetProperty( ObjVer, Class_DefID ).Value.GetLookupID() <> Landfile_Class_DefID Then
+	If (DocDateValue <> "") Then 
+		
+		If (CDate(DocDateValue) > Date) Then
+			Err.Raise MFScriptCancel, "The Document Date Must Be Less Then Or Equal To Today's Date."
+		End If
+	End IF
+End IF

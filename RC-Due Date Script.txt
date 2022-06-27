@@ -1,0 +1,339 @@
+Option Explicit
+' give the date a default value of null, incase the dateyear has no selected value
+
+Dim OutputValue : OutputValue = Null
+Dim NewDate : NewDate = Null 
+
+'Get the property definition id using the alias 
+Dim DOFP_Defid : DOFP_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.DOFP" )
+Dim Wildcat_Defid : Wildcat_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.Wildcat")
+DIM State_Defid : State_Defid =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.State.single")
+DIM RCAgency_Defid : RCAgency_Defid =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.Agency")
+DIM RCWorkflow_Defid : RCWorkflow_Defid =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.ChooseWorkflow")
+DIM EstimatedDOFP_Defid : EstimatedDOFP_Defid =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.EstimatedDOFP")
+DIM EstimatedFracStartDate_Defid : EstimatedFracStartDate_Defid =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.EstimatedFracStartDate")
+DIM RcFracString_Defid : RcFracString_Defid =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.FracString.Q")
+DIM RigReleaseDate_Defid : RigReleaseDate_Defid =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.RigReleaseDate")
+DIM ProdMethodChangeDate_Defid : ProdMethodChangeDate_Defid =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.ProductionMethodChangeDate")
+DIM TotalDepthDate_Defid : TotalDepthDate_Defid =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.TDDate")
+Dim WellGasConn_Defid : WellGasConn_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.WellGasConnection.Q")
+Dim ExceedFlaringLimit_Defid : ExceedFlaringLimit_Defid =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.ExceedFlaringLimit.Q")
+Dim SubmittalType_DefID : SubmittalType_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.SubmittalType")
+Dim EstimatedSubmitDate_DefID : EstimatedSubmitDate_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.EstimatedSubmittalDate")
+
+
+'get the current class
+Dim CurrentClass : CurrentClass = propertyValues.SearchForProperty(100).Value.DisplayValue
+
+'get the DOFP value
+Dim DOFP_value : DOFP_value = ""
+Dim EstimatedDOFP_value : EstimatedDOFP_value = ""
+Dim Agency_Value : Agency_Value = Null
+Dim EstimatedFracStartDate_Value : EstimatedFracStartDate_Value = Null
+Dim RcFracString_value : RcFracString_value = Null
+Dim RigReleaseDate_Value : RigReleaseDate_Value = Null
+Dim ProdMethodChangeDate_value : ProdMethodChangeDate_value = Null
+Dim TotalDepthDate_value : TotalDepthDate_value = Null
+Dim WellGasConn_Value : WellGasConn_Value = Null
+Dim SubmittalType_Value : SubmittalType_Value =""
+
+If PropertyValues.IndexOf(DOFP_Defid) > -1 Then
+	DOFP_value = PropertyValues.SearchForProperty( DOFP_Defid ).TypedValue.DisplayValue
+End If
+
+If PropertyValues.IndexOf(EstimatedDOFP_Defid) > -1 Then
+	EstimatedDOFP_value = PropertyValues.SearchForProperty( EstimatedDOFP_Defid ).TypedValue.DisplayValue
+End If
+
+If PropertyValues.IndexOf(SubmittalType_DefID) > -1 Then
+	SubmittalType_Value = PropertyValues.SearchForProperty( SubmittalType_DefID ).TypedValue.DisplayValue
+End If
+
+'If class is RC Process then 
+If (CurrentClass ="RC Process") Then
+	If PropertyValues.IndexOf(RCWorkflow_Defid) > -1 Then
+		Dim WF_value : WF_value = PropertyValues.SearchForProperty( RCWorkflow_Defid ).TypedValue.DisplayValue
+		If WF_value <> "" Then
+			
+			If (WF_value ="First Production Notice" ) Then 
+			' the below line will set the expiration date to current date+5 years 
+				If (PropertyValues.IndexOf(DOFP_Defid) > -1 and DOFP_value<> "")  Then
+					NewDate = DateAdd("d",5, DOFP_value)
+					OutputValue = NewDate
+				End If
+			End If	
+			
+			If (WF_value ="Completion Report" or WF_value ="BLM Completion Report") Then 
+				If (PropertyValues.IndexOf(DOFP_Defid) > -1 and DOFP_value<> "" ) Then
+					NewDate = DateAdd("d",30, DOFP_value)
+				End If
+
+				If PropertyValues.IndexOf(Wildcat_Defid) > -1 and PropertyValues.IndexOf(State_Defid) > -1 Then
+					Dim WildCat_Value : WildCat_Value= PropertyValues.SearchForProperty( Wildcat_Defid ).TypedValue.DisplayValue
+					Dim State_Value : State_Value = PropertyValues.SearchForProperty( State_Defid ).TypedValue.DisplayValue
+					If (WildCat_Value = "Yes" and State_Value = "MT") Then
+						If (PropertyValues.IndexOf(DOFP_Defid) > -1 and DOFP_value<> ""  )Then
+							NewDate = DateAdd("m",6, DOFP_value)
+							OutputValue = NewDate
+						End If
+					End If
+				End If
+				OutputValue = NewDate
+			End IF
+
+			If (WF_value ="Authorization to Transport" ) Then 
+				If PropertyValues.IndexOf(RCAgency_Defid) > -1 Then
+						Agency_Value = PropertyValues.SearchForProperty( RCAgency_Defid ).TypedValue.DisplayValue
+						If (Agency_Value ="COGCC"  and DOFP_value <> "") Then 
+							NewDate = DateAdd("d",30, DOFP_value)
+							OutputValue = NewDate
+						End IF
+
+						If ((Agency_Value ="NDIC" or Agency_Value ="MBOGC") and EstimatedDOFP_value <> "" ) Then 
+
+							NewDate = DateAdd("d",-7, EstimatedDOFP_value)
+							OutputValue = NewDate
+						End IF
+				End IF
+			End IF
+
+			If (WF_value ="Commingle Sundry" ) Then 
+				If PropertyValues.IndexOf(RCAgency_Defid) > -1 Then
+					Agency_Value = PropertyValues.SearchForProperty( RCAgency_Defid ).TypedValue.DisplayValue
+					If ((Agency_Value ="NDIC" ) and EstimatedDOFP_value <> ""  and SubmittalType_Value ="New Well Processes") Then 
+						NewDate = DateAdd("d",-7, EstimatedDOFP_value)
+						OutputValue = NewDate
+					End IF
+
+					If (SubmittalType_Value = "Existing Well Processes" ) Then
+						If PropertyValues.IndexOf(EstimatedSubmitDate_DefID) > -1 Then
+							if( PropertyValues.SearchForProperty( EstimatedSubmitDate_DefID ).TypedValue.DisplayValue <> "") Then
+								NewDate = PropertyValues.SearchForProperty( EstimatedSubmitDate_DefID ).TypedValue.DisplayValue
+								OutputValue = NewDate
+							End If
+						End If						
+					End If
+				End IF
+			End IF
+
+			If (WF_value ="Notification of Frac" ) Then 
+				If PropertyValues.IndexOf(EstimatedFracStartDate_Defid) > -1 Then
+					EstimatedFracStartDate_Value = PropertyValues.SearchForProperty( EstimatedFracStartDate_Defid ).TypedValue.DisplayValue
+					If ( EstimatedFracStartDate_Value <> "" ) Then 
+						NewDate = DateAdd("d",-2, EstimatedFracStartDate_Value)
+						OutputValue = NewDate
+					End IF
+				End IF
+			End IF
+
+			If (WF_value ="Flow Up Casing Notice" ) Then 
+				If PropertyValues.IndexOf(RcFracString_Defid) > -1 and PropertyValues.IndexOf(EstimatedFracStartDate_Defid) > -1  Then
+					RcFracString_value = PropertyValues.SearchForProperty( RcFracString_Defid ).TypedValue.DisplayValue
+					EstimatedFracStartDate_Value = PropertyValues.SearchForProperty( EstimatedFracStartDate_Defid ).TypedValue.DisplayValue
+					If (RcFracString_value <> "" and RcFracString_value = "No" and EstimatedFracStartDate_Value <> "" ) Then 
+						NewDate = DateAdd("d",-5, EstimatedFracStartDate_Value)
+						OutputValue = NewDate
+					End IF
+				End IF
+			End IF
+
+			If (WF_value ="Gas Oil Ratio Report" ) Then 
+				If PropertyValues.IndexOf(DOFP_Defid) > -1 Then
+					If DOFP_value <> "" Then
+						NewDate = DateAdd("d",30, DOFP_value)
+						OutputValue = NewDate
+					End If
+				End If
+			End IF
+			' Added 4/16/2019 changed Confidentiality Request formula from EstimatedDOFP_value to EstimatedDOFP_value+10 days
+			If (WF_value ="Confidentiality Request" ) Then 
+				'Err.Raise MFScriptCancel, "is conf request is "
+				If PropertyValues.IndexOf(EstimatedDOFP_Defid) > -1 Then
+					If EstimatedDOFP_value <> "" Then
+						NewDate = DateAdd("d",10, EstimatedDOFP_value)
+						OutputValue = NewDate
+					End If
+				End If
+			End IF
+
+			If (WF_value ="Prelim Completion Report" ) Then 
+				If PropertyValues.IndexOf(RCAgency_Defid) > -1 Then
+						Agency_Value = PropertyValues.SearchForProperty( RCAgency_Defid ).TypedValue.DisplayValue
+						If (Agency_Value ="COGCC"  and PropertyValues.IndexOf(RigReleaseDate_Defid) > -1) Then 
+							RigReleaseDate_Value = PropertyValues.SearchForProperty( RigReleaseDate_Defid ).TypedValue.DisplayValue
+							if RigReleaseDate_Value <>"" Then
+								NewDate = DateAdd("d",60, RigReleaseDate_Value)
+								OutputValue = NewDate
+							End If
+						End IF
+
+						If ((Agency_Value ="NDIC") and  PropertyValues.IndexOf(TotalDepthDate_Defid) > -1 ) Then 
+							TotalDepthDate_value= PropertyValues.SearchForProperty( TotalDepthDate_Defid ).TypedValue.DisplayValue
+							if TotalDepthDate_value <>"" Then
+								NewDate = DateAdd("d",30, TotalDepthDate_value)
+								OutputValue = NewDate
+							End If
+						End IF
+				End IF
+			End IF
+
+			If (WF_value ="Production Method Sundry" ) Then 
+				'Err.Raise MFScriptCancel, "is conf request is "
+				If PropertyValues.IndexOf(ProdMethodChangeDate_Defid) > -1 Then
+					ProdMethodChangeDate_value = PropertyValues.SearchForProperty( ProdMethodChangeDate_Defid ).TypedValue.DisplayValue
+					If SubmittalType_Value = "New Well Processes"  and ProdMethodChangeDate_value <> "" Then
+						NewDate = DateAdd("d",30, ProdMethodChangeDate_value)
+						OutputValue = NewDate
+					End If
+
+					If (SubmittalType_Value = "Existing Well Processes" ) Then
+						If PropertyValues.IndexOf(EstimatedSubmitDate_DefID) > -1 Then
+							if( PropertyValues.SearchForProperty( EstimatedSubmitDate_DefID ).TypedValue.DisplayValue <> "") Then
+								NewDate = PropertyValues.SearchForProperty( EstimatedSubmitDate_DefID ).TypedValue.DisplayValue
+								OutputValue = NewDate
+							End If
+						End If						
+					End If
+				End If
+			End IF
+
+			If (WF_value ="Flare Gas Sundry" ) Then 
+				If PropertyValues.IndexOf(RCAgency_Defid) > -1 Then
+					If PropertyValues.IndexOf(WellGasConn_Defid) > -1 Then
+						Agency_Value = PropertyValues.SearchForProperty( RCAgency_Defid ).TypedValue.DisplayValue
+						WellGasConn_Value = PropertyValues.SearchForProperty( WellGasConn_Defid ).TypedValue.DisplayValue
+						'Err.Raise MFScriptCancel, "Well Gas Connection Value " & WellGasConn_Value
+						If (Agency_Value ="COGCC"  and WellGasConn_Value ="No") Then 
+							If EstimatedDOFP_value <> "" Then
+								NewDate = DateAdd("d",-7, EstimatedDOFP_value)
+								OutputValue = NewDate
+							End If
+						End IF
+
+						If ((Agency_Value ="MBOGC") and WellGasConn_Value ="No" ) Then 
+							If PropertyValues.IndexOf(ExceedFlaringLimit_Defid) > -1 Then
+								Dim ExceedFlaringLimit_value : ExceedFlaringLimit_value = PropertyValues.SearchForProperty( ExceedFlaringLimit_Defid ).TypedValue.DisplayValue
+								If ExceedFlaringLimit_value = "No" Then
+									NewDate = Null 
+									OutputValue = NewDate
+								End If
+								If ExceedFlaringLimit_value = "Yes"  and DOFP_value <> ""Then
+									NewDate = DateAdd("d",30, DOFP_value)
+									OutputValue = NewDate
+								End If
+							End If
+						End IF
+
+						If (WellGasConn_Value ="Yes") Then 
+							NewDate = Null 
+							OutputValue = NewDate
+						End IF
+						
+					End IF
+				End If
+			End If
+
+			If (WF_value ="Casing Monitor Notice" ) Then 
+				If PropertyValues.IndexOf(EstimatedFracStartDate_Defid) > -1 Then
+					EstimatedFracStartDate_Value = PropertyValues.SearchForProperty( EstimatedFracStartDate_Defid ).TypedValue.DisplayValue
+					If ( EstimatedFracStartDate_Value <> "" ) Then 
+						NewDate = DateAdd("d",-5, EstimatedFracStartDate_Value)
+						OutputValue = NewDate
+					End IF
+				End IF
+			End IF
+
+			If (WF_value ="LACT Install/Removal" or WF_value ="Shared LACT Sundry") Then 
+				If SubmittalType_Value = "New Well Processes"  and PropertyValues.IndexOf(RCAgency_Defid) > -1 Then
+					Agency_Value = PropertyValues.SearchForProperty( RCAgency_Defid ).TypedValue.DisplayValue
+					If ((Agency_Value ="NDIC" ) and EstimatedDOFP_value <> "" ) Then 
+						NewDate = DateAdd("d",-14, EstimatedDOFP_value)
+						OutputValue = NewDate
+					End IF
+				End IF
+
+				If (SubmittalType_Value = "Existing Well Processes" ) Then
+					If PropertyValues.IndexOf(EstimatedSubmitDate_DefID) > -1 Then
+						if( PropertyValues.SearchForProperty( EstimatedSubmitDate_DefID ).TypedValue.DisplayValue <> "") Then
+							NewDate = PropertyValues.SearchForProperty( EstimatedSubmitDate_DefID ).TypedValue.DisplayValue
+							OutputValue = NewDate
+						End If
+					End If						
+				End If
+			End IF
+
+			If (WF_value ="General Sundry Notice") Then
+				If PropertyValues.IndexOf(EstimatedSubmitDate_DefID) > -1 Then
+					if( PropertyValues.SearchForProperty( EstimatedSubmitDate_DefID ).TypedValue.DisplayValue <> "") Then
+						NewDate = PropertyValues.SearchForProperty( EstimatedSubmitDate_DefID ).TypedValue.DisplayValue
+						OutputValue = NewDate
+					End If
+				End If
+			End If
+
+		End IF			
+	End IF
+End IF
+
+if IsNull(OutputValue) Then 
+	OutputValue = OutputValue
+else
+	OutputValue = GetUpdatedDate(OutputValue)
+End If 
+
+
+Output = OutputValue
+
+
+'================================HELPER FUNCTIONS=================================
+
+Function GetUpdatedDate(outDate)
+	dim NextValidDate : NextValidDate = outDate
+	Dim DayOfWeek : DayOfWeek = Weekday(NextValidDate,1) ' will give u the day of the week Sunday =1, saturday =7
+	
+	'Err.Raise MFScriptCancel, "outDate:" &outDate &" "& isHolidayDay(NextValidDate)
+
+	'if output day falls on saturday or sunday 
+	If (DayOfWeek =1 or DayOfWeek= 7) Then
+		If (DayOfWeek =7 ) then
+			NextValidDate = DateAdd("d",2, NextValidDate)
+		Else
+			NextValidDate = DateAdd("d",1, NextValidDate) 
+		End if 
+	End If 
+	
+	DayOfWeek = Weekday(NextValidDate,1)
+	' if monday - thursday
+	If (DayOfWeek > 1 and  DayOfWeek <6 ) Then
+		If (isHolidayDay(NextValidDate) = True ) Then
+			NextValidDate = DateAdd("d",1, NextValidDate)
+		End If
+	End If
+	
+	DayOfWeek = Weekday(NextValidDate,1)
+	' if Friday
+	If (DayOfWeek =6 ) Then
+		If (isHolidayDay(NextValidDate) = True ) Then
+			NextValidDate = DateAdd("d",3, NextValidDate)
+		End If
+	End If
+	
+	GetUpdatedDate = NextValidDate
+End Function
+
+Function isHolidayDay (outDate)
+	Dim HolidayDictionary : Set HolidayDictionary = CreateObject("Scripting.Dictionary")
+	HolidayDictionary.CompareMode = vbTextCompare
+	Dim isHoliday : isHoliday = false
+	Dim DateYear : DateYear = Year(outDate)
+	'Err.Raise MFScriptCancel, DateYear
+	HolidayDictionary.Add CStr("7/4/"&DateYear), "7/4/"&DateYear
+	HolidayDictionary.Add CStr("11/11/"&DateYear), "11/11/"&DateYear
+	HolidayDictionary.Add CStr("12/25/"&DateYear), "12/25/"&DateYear
+	HolidayDictionary.Add CStr("1/1/"&DateYear), "12/31/"&DateYear
+	
+	if HolidayDictionary.Exists(CStr(outDate)) Then
+		isHoliday = true
+	End If
+	isHolidayDay = isHoliday
+End Function

@@ -1,0 +1,460 @@
+'''GOAL: THIS CODE TRIGGERS WHEN AN OBJECT THAT HAS "LAND FILES" CLASS IS UPDATED OR CREATED, THE PURPOSE OF THIS SCRIPT
+''' IS TO UPDATE THE "PROSPECT", "OFFICE", "LAND FILES DOC DATE", "NAME OR TITLE"
+'''
+'''CREATED BY : ANTOINE IBRAHIM
+'''VERSION : 1.2
+'''Update 1: 10/11/2018 - changed code to improve performance of event handler doing one search instead of many
+'''Update 2: 9/4/2019 - Added script provided by zachary wick (Mfiles) to keep modified by user. line 100-104
+'''Update 3 10/25/2021- Added name or title concatenation logic for the "Division order" Doc type, updated DB function to try/catch close a connection on error 
+'''Update v 11/4/2021 - changed WOGCC naming convention to match MANDC. Moved the index date portion in the main if statement. 
+'''LAST MODIFIED: 11/4/2021
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+' GET THE DEF ID'S FOR ALL THE PROPERTIES OF INTEREST ON THE CURRENT METADTA CARD 
+Const Class_DefID = 100
+Const LandView ="[M-FilesTest].[land].[vLease]"
+Const AssignmentView = "[M-FilesTest].[land].[vAssignment]"
+Const WellView = "[M-FilesTest].[land].[vWELLDATA]"
+Const DB_CONNECT_STRING = "Provider=SQLOLEDB.1;Password={password};Persist Security Info=True;User ID={username};Initial Catalog=M-Files;Data Source={source}"
+Const LandViewDate= "Eff_date"
+Const AssignmentViewDate ="documentEffDae"
+
+Const LandViewOfficeCol= "office"
+Const WellViewOfficeCol ="office_code"
+
+Const WellViewProspectCol = "prospect"
+
+Const LandViewWhereClause = "shadow_key"
+Const AssignmentWhereClause ="AssignmentNumber"
+Const WellWhereClause = "wpcid"
+
+Dim DocCategory_Defid : DocCategory_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.Category-LAND")
+Dim DocType_DefID : DocType_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.Type-LAND")
+Dim LeaseNum_Defid : LeaseNum_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.Lease-number")
+Dim Lessor_Defid : Lessor_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.Lessor")
+Dim BoloWell_DefID : BoloWell_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.BOLO-Well-name")
+Dim Nickname_Defid : Nickname_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.Nickname")
+Dim AssignmentName_DefID : AssignmentName_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.AssignmentName ")
+Dim AssignmentTab_Defid : AssignmentTab_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.AssignmentTab")
+Dim TransactionName_Defid : TransactionName_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.Transaction-Name")
+Dim BoloOwnerNum_DefID : BoloOwnerNum_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.BOLO-Owner-Number")
+Dim BoloOwnerName_DefID : BoloOwnerName_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.BOLO-Owner-Name")
+Dim Wpcid_multi_DefID : Wpcid_multi_DefID  = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.BOLOWPCID.Multi")
+Dim Wpcid_Single_DefID : Wpcid_Single_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.BOLOWPCID.single")
+Dim uniqueId_DefID : uniqueId_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.Land-Unique-ID")
+Dim OriginalFileName_DefID : OriginalFileName_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.OriginalFileName")
+Dim IndexDate_DefID : IndexDate_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.IndexDate.timestamp")
+
+Dim LandDocDate_DefID : LandDocDate_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.LandFilesDocDate")
+Dim Office_DefId : Office_DefId = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.Office")
+Dim BoloProspect_DefId : BoloProspect_DefId = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.BOLOProspect")
+
+Dim ProspectVL_DefId : ProspectVL_DefId = Vault.ValueListOperations.GetValueListIDByAlias("VL.BOLOProspect")
+
+' Get the properties of the object.
+dim PropertyVals : set PropertyVals = Vault.ObjectPropertyOperations.GetProperties( ObjVer, false )
+
+' GET THE CURRENT DATE LOCAL TIME, NOT UTC
+Set dateTime = CreateObject("WbemScripting.SWbemDateTime")    
+dateTime.SetVarDate (now())
+Dim IndexDate : IndexDate = ""
+
+Dim NewDocumentName : NewDocumentName = ""
+
+' GET THE DEF ID'S FOR THE CLASSES OF INTEREST (LAND FILES)
+Dim LandFiles_Class_DefID : LandFiles_Class_DefID = Vault.ClassOperations.GetObjectClassIDByAlias( "Class.Document.LandFiles" )
+
+Dim CurrentClass_DefID : CurrentClass_DefID =Vault.ObjectPropertyOperations.GetProperty( ObjVer, Class_DefID ).Value.GetLookupID()
+
+' IF THE CLASS OF THE CURRENT OBJECT BEING CHECKDED IN IS LAND FILE THEN CONTINUE WITH FUNCTIONALITY 
+If (CurrentClass_DefID = LandFiles_Class_DefID ) Then
+	IndexDate = GetIndexDate
+	' THE SCRIPT IS DEPENDANT ON DOCUMENT CATEGORY HAVING A VALUE, ONLY PROCEED IF IT HAS A VALUE
+	IF PropertyVals.IndexOf(DocCategory_Defid) > -1 Then
+		Dim DocCat_value : DocCat_value = PropertyVals.SearchForProperty(DocCategory_Defid).Value.DisplayValue
+		IF DocCat_value <> "" Then 
+			'EVERY NAME CONCATENATION STARTS WITH DOCUMENT CATEGORY SO START OFF BY ADDING IT TO THE NEW FILENAME
+			NewDocumentName = DocCat_value
+			UpdateFileName(DocCat_value)
+		End if 
+	End IF 	
+	
+	dim NameOrTitleIndex : NameOrTitleIndex = PropertyVals.IndexOf(0)
+	dim OriginalFileNameIndex : OriginalFileNameIndex = PropertyVals.IndexOf(OriginalFileName_DefID)
+		
+	' Get the current minor version.
+	
+	Dim NameOrTitle : NameOrTitle = "" 
+	
+	IF NameOrTitleIndex > -1 Then
+		NameOrTitle= PropertyVals.SearchForProperty(0).Value.DisplayValue
+		dim NameOrTitleProp : set NameOrTitleProp = PropertyVals( NameOrTitleIndex )
+	
+
+		IF OriginalFileNameIndex > -1 Then
+			If  PropertyVals.SearchForProperty(OriginalFileName_DefID).Value.DisplayValue="" Then
+				dim OriginalFileNameProp : set OriginalFileNameProp = PropertyVals( OriginalFileNameIndex )
+				OriginalFileNameProp.Value.SetValue MFDatatypeText, NameOrTitle
+				Vault.ObjectPropertyOperations.SetProperty ObjVer, OriginalFileNameProp
+			End If
+		End IF 	
+	
+		NameOrTitleProp.Value.SetValue MFDatatypeText, NewDocumentName
+		Vault.ObjectPropertyOperations.SetProperty ObjVer, NameOrTitleProp
+	End IF 
+
+	'MAKE SURE THE MODIFIED BY USER, US THE CURRENT USER 
+	Const ModifiedBy = 23
+	Dim lastModifiedVal : Set lastModifiedVal = CreateObject("MFilesAPI.TypedValue")
+	lastModifiedVal.Value = Now
+	Dim SetModifiedToCurrentUser : set SetModifiedToCurrentUser =Vault.ObjectPropertyOperations.SetLastModificationInfoAdmin (ObjVer, True, PropertyVals.SearchForProperty(ModifiedBy).Value , True, lastModifiedVal)
+End IF 	
+'Err.Raise MFScriptCancel, DwfDocumentName & ", filename: " & NameOrTitle
+
+
+
+'============================================='
+'============= HELPER FUNCTIONS =============='
+'============================================='
+
+'THIS IS A LOGICAL PATH FUNCTION, IT DECIDES WHAT FUNCTIONS CALL AND WHAT ATTRIBUTES TO UPDATE BASED ON THE 
+'VALUE OF THE DOCUMENT CATEGORY 
+
+
+public function UpdateFileName(DocCat_val)
+	Dim LandDateVal 
+	Dim OfficeVal
+	Dim ProspectVal
+	IF DocCat_val = "Leases" or DocCat_val = "SUA/ROW" Then 
+		NewDocumentName = NewDocumentName + ConcatFieldValue( DocType_DefID ,12)+ ConcatFieldValue( LeaseNum_Defid ,-1)+ ConcatFieldValue( Lessor_Defid ,30)+ ConcatFieldValue( uniqueId_DefID ,-1) 
+		
+		' set the Land File Doc date filed from the database using lease number
+		LandDateVal= GetDataFieldFromDB (LandViewDate, LandView, LandViewWhereClause, ConcatFieldValue(LeaseNum_Defid, 0))
+		setProperty LandDocDate_DefID, LandDateVal, 0
+		
+		' set the lease and SUA/ROW office value from DB using lease number 
+		OfficeVal = GetDataFieldFromDB (LandViewOfficeCol, LandView, LandViewWhereClause, ConcatFieldValue(LeaseNum_Defid, 0))
+		setProperty Office_DefId, OfficeVal, 0
+	End if
+
+	IF DocCat_val = "Well Files" Then 
+		NewDocumentName = NewDocumentName + ConcatFieldValue( BoloWell_DefID ,40)+ ConcatFieldValue( DocType_DefID ,25)+ ConcatFieldValue( uniqueId_DefID ,-1) 
+		
+		' update the office property of well file docs from the DB using the WPCID
+		OfficeVal = GetDataFieldFromDB (WellViewOfficeCol, WellView, WellWhereClause, ConcatFieldValue(Wpcid_Single_DefID, 0))
+		setProperty Office_DefId, OfficeVal, 0
+
+		' update the office property of well file docs from the DB using the WPCID
+		ProspectVal = GetDataFieldFromDB (WellViewProspectCol, WellView, WellWhereClause, ConcatFieldValue(Wpcid_Single_DefID, 0))
+		setProperty BoloProspect_DefId, ProspectVal, ProspectVL_DefId
+	End if 
+
+	IF DocCat_val = "Title Opinions" Then 
+		NewDocumentName = Mid(NewDocumentName, 1, 5) + ConcatFieldValue( DocType_DefID ,20)+ ConcatFieldValue( Nickname_Defid ,40)+ ConcatFieldValue( uniqueId_DefID ,-1) 
+	End if 
+	
+	IF DocCat_val = "Assignment" Then 
+		NewDocumentName = NewDocumentName + ConcatFieldValue( AssignmentName_DefID ,40)+ ConcatFieldValue( AssignmentTab_Defid ,-1)+ ConcatFieldValue( DocType_DefID ,20)+ ConcatFieldValue( uniqueId_DefID ,-1) 
+		
+		' set the Land File Doc date filed from the database using assignment File value
+		LandDateVal= GetDataFieldFromDB (AssignmentViewDate, AssignmentView, AssignmentWhereClause, ConcatFieldValue(AssignmentTab_Defid, 0))
+		setProperty LandDocDate_DefID, LandDateVal ,0
+
+		' set the value of office property to "" if it is there, otherwise dont do anything this should not be a property
+		setProperty Office_DefId, "", 0
+
+	End if 
+
+	IF DocCat_val = "Sale Files" or DocCat_val = "Acquisition Files" Then 
+		NewDocumentName = Mid(NewDocumentName, 1, 11) + ConcatFieldValue( TransactionName_Defid ,30)+ConcatFieldValue( DocType_DefID ,41)+ ConcatFieldValue( uniqueId_DefID ,-1) 
+		
+		' set the value of office property to "" if it is there, otherwise dont do anything this should not be a property
+		setProperty Office_DefId, "" ,0
+	End if 
+
+	IF DocCat_val = "Division Order" Then 
+		
+		IF PropertyVals.IndexOf(DocType_DefID) > -1 Then
+			Dim Doctype_Value : Doctype_Value = PropertyVals.SearchForProperty(DocType_DefID).Value.DisplayValue
+			If (Doctype_Value ="Manual Deck Change" OR Doctype_Value ="Whiting Change"  ) Then
+				NewDocumentName = NewDocumentName +"_" + GetDocTypeAbreviation(Doctype_Value) + ConcatMultiValue(Wpcid_multi_DefID)+"_" + IndexDate + GetDuplicateSuffix("MANDC")
+			else 
+				NewDocumentName = NewDocumentName +"_" + GetDocTypeAbreviation(Doctype_Value) + ConcatFieldValue( BoloOwnerNum_DefID ,-1)+ ConcatFieldValue( BoloOwnerName_DefID ,15) + ConcatMultiValue(Wpcid_multi_DefID)+ConcatFieldValue( uniqueId_DefID ,-1)+"_" + IndexDate + GetDuplicateSuffix(Doctype_Value)
+			End If
+		
+		End If
+
+		' set the value of office property to "" if it is there, otherwise dont do anything this should not be a property
+		setProperty Office_DefId, "" , 0
+	End if  
+	
+End Function
+
+' THIS FUNCTION IS USED FOR CONCATENATION OF VALUES, FOR NAME OR TITLE FIELD, I PROVIDE IT A PROPERTY DEF ID , AND A LENGTH OF CHARACTERS I WANT
+' IF THEN PROVIDED LENGHT IS > 0 IT WILL RETUEN A SUBSTRING OF LENGTH CHARACTERS
+' IF LENGTH =-1 IT WILL RETURN "_" + THE FULL VALUE 
+' IF LENGTH =0 IT WILL RETURN THE FULL VALUE WITHOUT AN UNDERSCORE (0 IS USED FOR FUNCTIONS OTHER THEN NAME CONCATENATION)
+' IF THE PROPERTY IS NOT ON THE METADATA CARD OR HAS AN EMPTY VALUE THEN AN EMPTY STRING IS RETURNED
+
+public function ConcatFieldValue(propDefId, length)
+	Dim strToReturn : strToReturn = ""
+	IF PropertyVals.IndexOf(propDefId) > -1 Then
+		Dim TempPropVal : TempPropVal = PropertyVals.SearchForProperty(propDefId).Value.DisplayValue
+		IF TempPropVal <> "" Then 
+			If length > 0 Then
+				strToReturn = "_"+ Mid(TempPropVal, 1, length)
+			Elseif length < 0 Then
+				strToReturn = "_"+ TempPropVal
+			else 
+				strToReturn =  TempPropVal
+			End If
+		End if 
+	End IF 	
+ConcatFieldValue = strToReturn
+End Function
+
+' THIS FUNCTION IS USED FOR NAMING CONCATENATION PURPOSES,  
+' IT TAKES IN A DEFID FROM A MULTI VALUE LIST, IF THERE IS MORE THEN ONE VALUE IT RETURNS "_MULTI"
+' IF THERE IS ONLY ONE VALUE THEN IT RETURNS THE VALUE WITH AN UNDERSCORE "_VALUE"
+
+public function ConcatMultiValue(propDefId)
+	Dim strToReturn : strToReturn = ""
+	IF PropertyVals.IndexOf(propDefId) > -1 Then
+		Dim TempPropVal : TempPropVal = PropertyVals.SearchForProperty(propDefId).Value.DisplayValue
+		IF TempPropVal <> "" Then 
+			if PropertyVals.SearchForProperty(propDefId).TypedValue.GetValueAsLookups().Count >1 Then
+				strToReturn = "_Multi"
+			else
+				strToReturn = "_"+ TempPropVal
+			End if
+		End if 
+	End IF 	
+ConcatMultiValue = strToReturn
+End Function
+
+' THIS FUNCTION IS USED TO RETRIEVE CERTAIN PROPERTY VALUES FROM THE DATABASE SO THE VALUE CAN BE PUT SET ON THE METADATA CARD
+' THIS HAS A GENERIC QUERY TO RETRIEVE ANY ROW FROM ANY TABLE USING A WHERE CLAUSE VALUE, ESSENTIALLY IT IS 
+' SELECT TOP 1 [COLUMN NAME] FROM [TABLE] WHERE [OTHER COLUMN NAME] = [GIVEN VALUE]
+
+public function GetDataFieldFromDB(fieldName,Table,whereClause,value)
+	
+	Dim SQL : SQL = "select top 1 isnull(" & fieldName & ",'') as [retVal] from " & Table & " where " & whereClause & " = '" & value &"'"
+	Dim myConn : Set myConn = CreateObject("ADODB.Connection")
+	DIM RS : SET RS = CreateObject("ADODB.recordset") 'new
+	
+	Dim field : field =""
+	on error resume next
+
+	myConn.Open DB_CONNECT_STRING	
+	RS.Open SQL,myConn
+	If Err.Number <> 0 Then		
+		If RS.State = 1 Then
+	        RS.Close
+			SET RS = Nothing
+		End If
+		If myConn.State = 1 Then
+	        myConn.Close
+			SET myConn = Nothing
+		End If
+		Err.Clear
+	else 
+		If NOT RS.EOF  Then 
+			field = RS("retVal")
+		end if 
+	End If
+
+	If RS.State = 1 Then
+        RS.Close
+		SET RS = Nothing
+	End If
+	If myConn.State = 1 Then
+        myConn.Close
+		SET myConn = Nothing
+	End If
+	GetDataFieldFromDB = field
+End Function
+
+' THIS FUNCTION IS USED TO SET ANY VALUE LIST, DATE OR TEXT FIELD, CAN WORK WITH OTHER FIELDS BUT UNTESTED, 
+' IF A DATE OR TEXT IS PROVIDED AS THE PROPVALUE, IT CHECKS THAT THE FIELD EXISTS AND IF IT DOES IT UPDATES THE VALUE
+'IF A VALUE LIST IS BEING UPDATED, IT VALIDATES THAT THE FIELD EXIST AND THAT THE VALUE EXISTS IN THE LIST, AND IF IT DOES 
+' IT UPDATES THE VALUE LIST WITH THAT VALUE 
+
+public function setProperty(propDefid, propValue,vlDefId)
+	dim PropIndex : PropIndex = PropertyVals.IndexOf(propDefid)
+	IF PropIndex > -1 Then		
+		dim PropertyToChange : set PropertyToChange = PropertyVals( PropIndex )
+		if (PropertyToChange.Value.DataType =MFDatatypeLookup) Then 
+			If propValue = "" Then 
+				PropertyToChange.Value.SetValueToNULL(MFDataType.MFDatatypeLookup)
+			elseif CheckIfValueInList (ProspectVL_DefId,propValue)= 0 Then
+				PropertyToChange.Value.SetValueToNULL(MFDataType.MFDatatypeLookup)
+			else
+				Dim oLookup : Set oLookup = CreateObject("MFilesAPI.Lookup")
+				Dim IdOfItemInValueList : IdOfItemInValueList = vault.ValueListItemOperations.GetValueListItemByDisplayID(vlDefId, propValue).ID
+				oLookup.Item = IdOfItemInValueList
+				PropertyToChange.Value.SetValueToLookup(oLookup)
+			End If
+		else
+			if (PropertyToChange.Value.DataType = MFDatatypeDate and (propValue= "1/1/1900"  or propValue= ""  )) then
+				PropertyToChange.Value.SetValue PropertyToChange.Value.DataType, null
+			else  
+				'Err.Raise MFScriptCancel, PropertyToChange.Value.DataType &" value " & propValue
+				PropertyToChange.Value.SetValue PropertyToChange.Value.DataType, propValue
+			End if
+			'Vault.ObjectPropertyOperations.SetProperty ObjVer, PropertyToChange
+		End if
+		Vault.ObjectPropertyOperations.SetProperty ObjVer, PropertyToChange
+	End IF 
+End Function
+
+
+
+' THIS FUNCTION TAKES IN A VALUE LIST ID AND A DISPLAY ID FOR A VALUE, IT THEN CHECKS THAT VALUE LIST TO SEE IF THERE
+'IS AN ITEM IN THE VALUE LIST THAT HAS THAT DISPLAY ID, IF DOESNT EXIST IT RETURNS 0 OTHERWISE 1
+
+public function CheckIfValueInList(VL_DefID, displayVal)
+	Dim oSearchCondition : Set oSearchCondition = CreateObject("MFilesAPI.SearchCondition")
+	oSearchCondition.Expression.SetValueListItemExpression MFValueListItemPropertyDefExtID,MFParentChildBehaviorNone, Nothing
+	oSearchCondition.ConditionType = MFConditionTypeEqual '1 
+	'oSearchCondition.TypedValue = oPropertyValue
+	oSearchCondition.TypedValue.SetValue MFDatatypeText, displayVal 
+
+	Dim oSearchConditions : Set oSearchConditions = CreateObject("MFilesAPI.SearchConditions")
+	oSearchConditions.Add -1, oSearchCondition
+	'Err.Raise MFScriptCancel, VL_DefID &" "&displayVal
+	Dim Results : set Results = vault.ValueListItemOperations.SearchForValueListItemsEx(VL_DefID, oSearchConditions)
+	
+CheckIfValueInList = Results.Count
+End Function
+
+' THIS FUNCTION RETURNS THE ABREVIATION VALUE OF THE CHANGE TYPE 
+Function GetDocTypeAbreviation (DocType)
+	Dim DT_Abreviations : Set DT_Abreviations = CreateObject("Scripting.Dictionary")
+	DT_Abreviations.CompareMode = vbTextCompare
+	
+	Dim abbreviation : abbreviation =""
+	
+	DT_Abreviations.Add "Division Order", "DIV"
+	DT_Abreviations.Add "Manual Deck Change", "MANDC"
+	DT_Abreviations.Add "Miscellaneous", "MISC"
+	DT_Abreviations.Add "Paycode Change", "PCC"
+	DT_Abreviations.Add "Transfers", "TRF"
+	DT_Abreviations.Add "Whiting Change", "WOGCC"
+	
+	if DT_Abreviations.Exists(DocType) Then
+		abbreviation = DT_Abreviations.Item(DocType)
+	End If
+	GetDocTypeAbreviation = abbreviation
+End Function
+
+
+Function GetIndexDate ()
+	returnDate =Replace(FormatDateTime(dateTime.GetVarDate(false) ,2),"/","-")
+	If (PropertyVals.IndexOf(IndexDate_DefID) > -1) Then
+		if(PropertyVals.SearchForProperty(IndexDate_DefID).Value.DisplayValue <>"") Then
+			returnDate =Replace(FormatDateTime(PropertyVals.SearchForProperty(IndexDate_DefID).Value.DisplayValue,2),"/","-")
+		End if
+	End If
+	GetIndexDate = returnDate
+End Function
+
+
+'THIS FUNCTION SEARCHES IF THERE IS AN DOWF WITH THE SAME VALUES, AND IF THERE IS,IT RETURNS A SUFFIX TO APPEND TO INDICATE IT IS A DUPLICATE EX _1
+public Function GetDuplicateSuffix(DeckType)
+	Dim ValueToAppend : ValueToAppend =  ""
+	Dim oSearchConditions : Set oSearchConditions = CreateObject("MFilesAPI.SearchConditions")
+	
+	'class search condition
+	Dim oClassSearchCondition : Set oClassSearchCondition = GetSearchConditionForPropery(100, LandFiles_Class_DefID, "Equal", "lookup")
+	oSearchConditions.Add -1, oClassSearchCondition
+	
+	'Category Search Condition
+	Dim CategorySearchCondition : Set CategorySearchCondition = GetSearchConditionForPropery(DocCategory_Defid, PropertyVals.SearchForProperty(DocCategory_Defid).Value.DisplayValue, "Equal", "Text")
+	oSearchConditions.Add -1, CategorySearchCondition 
+
+	'DocType search condition
+	Dim DocTypeSearchCondition : Set DocTypeSearchCondition = GetSearchConditionForPropery(DocType_DefID, PropertyVals.SearchForProperty(DocType_DefID).Value.DisplayValue, "Equal", "Text")
+	oSearchConditions.Add -1, DocTypeSearchCondition 
+	
+	'WPCID search condition
+	Dim WpcidList : Set WpcidList = PropertyVals.SearchForProperty(Wpcid_multi_DefID).TypedValue.GetValueAsLookups()
+'	Dim objArrayList : Set objArrayList = CreateObject("System.Collections.ArrayList")
+	
+	' GET THE NUMBER OF WELLS IN THE LIST AND LOOP THROUGH EACH ONE TO UPDATE ITS ASSOCIATED CHECKLIST 
+	For i = 1 To WpcidList.Count Step 1
+		Dim wpcidLookupID : wpcidLookupID = WpcidList.Item(i).Item
+		Dim WPCIDSearchCondition : Set WPCIDSearchCondition = GetSearchConditionForPropery(Wpcid_multi_DefID, wpcidLookupID , "Equal", "lookup")
+		oSearchConditions.Add -1, WPCIDSearchCondition 
+	Next
+
+	'Dim WPCIDearchCondition : Set WPCIDearchCondition = GetSearchConditionForPropery(Wpcid_multi_DefID, objArrayList , "Equal", "Multi")
+	'oSearchConditions.Add -1, WPCIDearchCondition 
+	
+	
+	'IndexDate Condition
+	Dim IndexDateSearchCondition : Set IndexDateSearchCondition = GetSearchConditionForPropery(IndexDate_DefID, IndexDate, "Greater", "timestamp")
+	oSearchConditions.Add -1, IndexDateSearchCondition
+	
+	If (DeckType <> "MANDC" and DeckType <> "WOGCC") Then
+		'bolo name search condition
+		Dim BoloNameSearchCondition : Set BoloNameSearchCondition = GetSearchConditionForPropery(BoloOwnerName_DefID, PropertyVals.SearchForProperty(BoloOwnerName_DefID).Value.DisplayValue, "Equal", "Text")
+		oSearchConditions.Add -1, BoloNameSearchCondition 
+		
+		'bolo owner search condition
+		Dim BoloOwnerSearchCondition : Set BoloOwnerSearchCondition = GetSearchConditionForPropery(BoloOwnerNum_DefID, PropertyVals.SearchForProperty(BoloOwnerNum_DefID).Value.DisplayValue, "Equal", "Text")
+		oSearchConditions.Add -1, BoloOwnerSearchCondition 
+	End If
+	
+
+	'get only non deleted items
+	Dim NotDeletedCondition : Set NotDeletedCondition = CreateObject("MFilesAPI.SearchCondition")
+	NotDeletedCondition.Expression.SetStatusValueExpression MFStatusType.MFStatusTypeDeleted, Nothing
+	NotDeletedCondition.ConditionType = MFConditionTypeEqual
+	NotDeletedCondition.TypedValue.SetValue MFDatatypeBoolean, false	
+	oSearchConditions.Add -1, NotDeletedCondition
+
+	
+	Dim oSearchResults : set oSearchResults = Vault.ObjectSearchOperations.SearchForObjectsByConditions(oSearchConditions, 0, false)
+	If (oSearchResults.Count >1) Then
+		ValueToAppend ="_"+ Cstr(oSearchResults.Count-1)
+	End If
+
+	GetDuplicateSuffix = ValueToAppend
+End Function
+
+
+'CREATES A SEARCH CONDITION FOR A LOOKUP BY ID
+public Function GetSearchConditionForPropery(PropertyDefID, ValueOrLookupID, conditionType, valType)
+	
+	Dim oSearchCondition : Set oSearchCondition = CreateObject("MFilesAPI.SearchCondition")
+	oSearchCondition.Expression.SetPropertyValueExpression PropertyDefID, MFParentChildBehaviorNone, Nothing
+	
+	'set condition type
+	If (conditionType ="Greater") THEN
+		oSearchCondition.ConditionType = MFConditionTypeGreaterThan 
+	else		
+		oSearchCondition.ConditionType = MFConditionTypeEqual
+	End If
+	
+	'set value
+	If (valType = "timestamp") Then
+		oSearchCondition.TypedValue.SetValue MFDatatypeTimestamp, cdate(ValueOrLookupID)
+	ElseIf(valType ="bool") Then
+		if (ValueOrLookupID = "false") Then
+			oSearchCondition.TypedValue.SetValue MFDatatypeBoolean, false
+		else 
+			oSearchCondition.TypedValue.SetValue MFDatatypeBoolean, True
+		End If
+	ElseIf(valType ="lookup") THEN
+		Dim oLookup : Set oLookup = CreateObject("MFilesAPI.Lookup")
+		oLookup.Item = ValueOrLookupID
+		oSearchCondition.TypedValue.SetValueToLookup(oLookup)
+	ElseIf (valType ="Multi") Then
+		oSearchCondition.TypedValue.SetValue MFDatatypeMultiSelectLookup, ValueOrLookupID.ToArray()
+	Else 'text
+		oSearchCondition.TypedValue.SetValue MFDatatypeText, ValueOrLookupID
+	End if
+	
+	' Return the search condition.'
+	Set GetSearchConditionForPropery = oSearchCondition
+End Function

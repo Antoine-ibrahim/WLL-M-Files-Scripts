@@ -1,0 +1,74 @@
+'''GOAL: THIS SCRIPT SENDS AN EMAIL NOTIFICATION TO THE TECHNICAL ACCOUNTING USER GROUP WHEN THE EXPIRATION DATE IS CHANGED ON A CONTRACT
+'''
+'''CREATED BY : ANTOINE IBRAHIM
+'''VERSION : 1.0
+'''LAST MODIFIED: 06/28/2019
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+'GET ALL THE DEF IDS FOR THE PROPERTIES WE ARE INTERESTED IN 
+Dim ExpDate_DefID : ExpDate_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.ExpireDate")
+Dim ContractManagement_Class_DefID : ContractManagement_Class_DefID = Vault.ClassOperations.GetObjectClassIDByAlias( "Class.Document.ContractManagement" )
+Dim AccountingGroup_Defid : AccountingGroup_Defid = Vault.UserGroupOperations.GetUserGroupIDByAlias("UserGroup.CMSTechnicalAccounting")
+Dim serverName : serverName ="https://wogc1.cloudvault.m-files.com"
+Const Class_DefID =100
+Const ModifiedDate_DefId =21
+Const ModifiedBy_DefId =23
+
+' GET CURRENT CLASS AND PROPERTIES
+Dim CurrentClass_DefID : CurrentClass_DefID = Vault.ObjectPropertyOperations.GetProperty( ObjVer, Class_DefID ).Value.GetLookupID()
+Dim PropertyVals : set PropertyVals = Vault.ObjectPropertyOperations.GetProperties( ObjVer, false )
+
+' PROCESS ONLY IF THE CLASS IS CONTRACT MANAGEMENT AND IF THE GROUP EXISTS. 
+If (CurrentClass_DefID = ContractManagement_Class_DefID AND AccountingGroup_Defid <> -1 ) Then '1
+	Dim ObjectVersions : Set ObjectVersions = Vault.ObjectOperations.GetHistory(ObjVer.ObjID)
+	
+	' ONLY CONTINUE IF THERE ARE MORE THAN 1 VERSION
+	If ObjectVersions.Count > 1 Then
+		Dim PrevObjver : Set PrevObjver = ObjectVersions.Item(2).ObjVer
+		Dim PreviousPropVals : set PreviousPropVals = Vault.ObjectPropertyOperations.GetProperties( PrevObjver, false )
+		' IF THE EXP DATE PROPERTY IS ON BOTH THE OLD AND NEW VERSION AND THE OLD DATE IS NOT NULL, SEND THE NOTIFICATION
+		If PreviousPropVals.IndexOf(ExpDate_DefID) > -1  and PropertyVals.IndexOf(ExpDate_DefID) > -1  Then
+			Dim OldExpDate : OldExpDate = PreviousPropVals.SearchForProperty(ExpDate_DefID).Value.DisplayValue
+			Dim CurExpDate : CurExpDate = PropertyVals.SearchForProperty(ExpDate_DefID).Value.DisplayValue
+			If CurExpDate <> OldExpDate  AND OldExpDate <> "" Then
+				SendNotification OldExpDate, CurExpDate
+			End If  
+		End If
+	End IF
+End If
+
+
+
+
+'============================================='
+'============= HELPER FUNCTIONS =============='
+'============================================='
+
+' HELPER FUNCTION THAT SENDS THE NOTIFICATION MESSAGE USING API NOTIFICAITON CAPABILITIES. 
+public function SendNotification(oldDate, curDate)
+	If AccountingGroup_Defid <> -1 Then
+		Dim vaultid : vaultid = Replace(Replace(vault.GetGUID(),"{",""),"}","")
+		Dim specificObjId : specificObjId = Replace(Replace(Vault.ObjectOperations.GetObjectGUID(ObjVer.ObjID),"{",""),"}","")
+		' GET THE VALUE TO THE PROPERTIES WE ARE GOING TO NEED FOR THE NOTIFICAITON FUNCTION (USER GROUP LIST, PROPERTY VALUES, AND DOC LINKS )
+		Dim Link : Link =serverName&"/Default.aspx#" & vaultid & "/object/" & specificObjId & "/latest"
+		Dim Title : Title = PreviousPropVals.SearchForProperty(0).Value.DisplayValue
+		Dim groupIdsCollection : set groupIdsCollection = CreateObject("MFilesAPI.UserOrUserGroupIDs")
+		Dim userGroup : set userGroup = CreateObject("MFilesAPI.UserOrUserGroupID")
+		Dim mod_by : mod_by = PreviousPropVals.SearchForProperty(ModifiedBy_DefId).Value.DisplayValue
+		Dim mod_date : mod_date = PreviousPropVals.SearchForProperty(ModifiedDate_DefId).Value.DisplayValue
+
+	    userGroup.UserOrGroupID = AccountingGroup_Defid
+	    userGroup.UserOrGroupType = MFUserOrUserGroupType.MFUserOrUserGroupTypeUserGroup
+	    groupIdsCollection.Add -1, userGroup
+	
+	    Dim  additionalusers : set additionalusers = CreateObject("MFilesAPI.Strings") 
+		Dim MfilesLink : MfilesLink = Vault.ObjectOperations.GetMFilesURLForObjectOrFile (ObjVer.ObjID, -1,false, -1, MFilesURLTypeShow)
+		
+		'SET THE MESSAGE BODY 
+		Dim NotificationBody : NotificationBody = "Hello,<br><br>The Expiration Date for the following contract has been modified by: "& mod_by
+		NotificationBody = NotificationBody &  "<br><br><b>Document</b>: "&Title&" (<a href=""" & Link & """>Web</a>, <a href=""" & MfilesLink & """>  Desktop</a>) <br> <b>Old Date</b>: " & oldDate &"<br> <b>New Date</b>: "&curDate &"<br><br>Regards, <br> M-Files RIM Team "
+		
+		'SEND A NOTIFICATION
+	    vault.NotificationOperations.SendCustomNotification groupIdsCollection, false, additionalusers, true, "Expiration Date Changed on Contract", NotificationBody 
+	End If 
+End Function

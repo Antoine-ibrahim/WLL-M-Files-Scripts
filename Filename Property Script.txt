@@ -1,0 +1,145 @@
+' Goal: Concatenate properties to create the FileName  
+Option Explicit
+
+Dim OutputValue : OutputValue =""
+
+'define the aliases for the needed property definitions
+'<<<<<<<<<<<<<<FIELD FILES ALIASES>>>>>>>>>>>>>>
+Dim Field_Alias : Field_Alias = "Property.Field.Single" 
+Dim DocTypeFF_Alias : DocTypeFF_Alias = "Property.VL.FF.DocumentType"
+Dim DocDate_Alias : DocDate_Alias = "Property.DocumentDate" 
+Dim SpDocID_Alias : SpDocID_Alias = "Property.SPDocumentID" 
+Dim SeqID_Alias : SeqID_Alias = "Property.SeqID" 
+
+'<<<<<<<<<<<<<<<MARKETING CONTRACT ALIASES>>>>>>>>>>>>>>>>
+Dim ContractNumber_Alias : ContractNumber_Alias = "Property.VL.Contracts.single"
+Dim DocCatMKT_Alias : DocCatMKT_Alias = "Property.VL.MKTDocumentCategory" 
+Dim ContractEfectiveDate_Alias : ContractEfectiveDate_Alias = "Property.ContractEffectiveDate"
+Dim Purchaser_Alias : Purchaser_Alias = "Property.VL.Purchasers.multi" 
+
+'<<<<<<<<<<<<<<<PRODUCTION ACCOUNTING ALIASES>>>>>>>>>
+Dim Battery_Alias : Battery_Alias ="Property.Battery.Single"
+Dim State_Alias : State_Alias ="Property.VL.State.single"
+Dim DocTypePA_Alias : DocTypePA_Alias ="Property.VL.DocumentType-PA.single"
+Dim ProdYear_Alias : ProdYear_Alias ="Property.MSA.ProdYear.single"
+Dim ProdMonth_Alias : ProdMonth_Alias ="Property.PA.ProdMonth.single"
+
+
+
+'Get the property definition id using the alias of the fields and Us_States properties
+Dim Fields_Defid : Fields_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias(Field_Alias)
+Dim DocTypeFF_DefId : DocTypeFF_DefId = Vault.PropertyDefOperations.GetPropertyDefIDByAlias(DocTypeFF_Alias)
+Dim DocDate_Defid : DocDate_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias(DocDate_Alias)
+Dim SpDocID_DefId : SpDocID_DefId = Vault.PropertyDefOperations.GetPropertyDefIDByAlias(SpDocID_Alias)
+Dim SeqId_DefId : SeqId_DefId = Vault.PropertyDefOperations.GetPropertyDefIDByAlias(SeqID_Alias)
+
+Dim ContractNumber_Defid : ContractNumber_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias(ContractNumber_Alias)
+Dim DocCatMKT_DefId : DocCatMKT_DefId = Vault.PropertyDefOperations.GetPropertyDefIDByAlias(DocCatMKT_Alias)
+Dim ContractEfectiveDate_Defid : ContractEfectiveDate_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias(ContractEfectiveDate_Alias)
+Dim Purchaser_DefId : Purchaser_DefId = Vault.PropertyDefOperations.GetPropertyDefIDByAlias(Purchaser_Alias)
+
+Dim Battery_Defid : Battery_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias(Battery_Alias)
+Dim State_DefId : State_DefId = Vault.PropertyDefOperations.GetPropertyDefIDByAlias(State_Alias)
+Dim DocTypePA_Defid : DocTypePA_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias(DocTypePA_Alias)
+Dim ProdYear_DefId : ProdYear_DefId = Vault.PropertyDefOperations.GetPropertyDefIDByAlias(ProdYear_Alias)
+Dim ProdMonth_DefId : ProdMonth_DefId = Vault.PropertyDefOperations.GetPropertyDefIDByAlias(ProdMonth_Alias)
+Dim BatteryMulti_Defid : BatteryMulti_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.Batteries.Multi")
+
+'get the current class
+Dim CurrentClass : CurrentClass = propertyValues.SearchForProperty(100).Value.DisplayValue
+
+
+' if the class is field files then continue with the automatic value naming
+If (CurrentClass ="Field Files" ) Then
+	
+	' get the value of the Field attribute on the metadata card
+	Dim Field_Value : Field_Value= propertyValues.SearchForProperty(Fields_Defid).Value.DisplayValue
+	Dim DocTypeFF_Value : DocTypeFF_Value = propertyValues.SearchForProperty(DocTypeFF_DefId).Value.DisplayValue
+	Dim DocDate_Value : DocDate_Value = propertyValues.SearchForProperty(DocDate_Defid).Value.DisplayValue
+	Dim SpDocID_value : SpDocID_value = propertyValues.SearchForProperty(SpDocID_DefId).Value.DisplayValue
+	Dim SeqID_value : SeqID_value = propertyValues.SearchForProperty(SeqId_DefId).Value.DisplayValue
+
+
+	Dim SeqenceValue : SeqenceValue =SeqID_value
+
+	' if there is a spDocID has a value then use that otherwise we use the seqID in the name
+	If (SpDocID_value <> "") Then 
+		SeqenceValue=SpDocID_value
+	End if
+
+	If (Field_Value <> "" And DocTypeFF_Value <> "" And DocDate_Value <> ""  ) Then
+		OutputValue =Mid(Field_Value, 1, 15) +"_"+Mid(DocTypeFF_Value, 1, 15)+"_"+myDateFormat(DocDate_Value)+"_"+SeqenceValue
+	Else
+		Err.Raise MFScriptCancel, "Please make sure you put a valid value for Field, Document Type FF, and Document Date"
+	End If	
+
+End If
+
+' if the class is marketing then use the following automatic value naming
+If (CurrentClass ="Marketing Contracts" ) Then
+	
+	' get the value of the Field attribute on the metadata card
+	Dim ContractNumber_Value : ContractNumber_Value= propertyValues.SearchForProperty(ContractNumber_Defid).Value.DisplayValue
+	Dim DocCatMKT_Value : DocCatMKT_Value = propertyValues.SearchForProperty(DocCatMKT_DefId).Value.DisplayValue
+	Dim ContractEfectiveDate_Value : ContractEfectiveDate_Value = propertyValues.SearchForProperty(ContractEfectiveDate_Defid).Value.DisplayValue
+	Dim Purchaser_value : Purchaser_value = propertyValues.SearchForProperty(Purchaser_DefId).Value.DisplayValue
+
+
+	If (ContractNumber_Value <> "" And DocCatMKT_Value <> "" And ContractEfectiveDate_Value <> "" And Purchaser_value <> "" ) Then
+	OutputValue =Mid(ContractNumber_Value, 1, 15) +"_"+Mid(DocCatMKT_Value, 1, 15)+"_"+myDateFormat(ContractEfectiveDate_Value)+"_"+Mid(Purchaser_value, 1, 15)
+	Else
+		Err.Raise MFScriptCancel, "Please make sure you put a valid value for Contract Number, Document Category MKT, Contract Effective Date, and Purchaser"
+	End If	
+
+End If
+
+' if the class is Production Accounting then continue with the automatic value naming
+If (CurrentClass ="Production Accounting" ) Then
+	
+	' get the value of the Field attribute on the metadata card
+	Dim Battery_Value : Battery_Value= propertyValues.SearchForProperty(Battery_Defid).Value.DisplayValue
+	Dim State_Value : State_Value = propertyValues.SearchForProperty(State_DefId).Value.DisplayValue
+	Dim DocTypePA_Value : DocTypePA_Value = propertyValues.SearchForProperty(DocTypePA_Defid).Value.DisplayValue
+	Dim ProdYear_value : ProdYear_value = propertyValues.SearchForProperty(ProdYear_DefId).Value.DisplayValue
+	Dim ProdMonth_value : ProdMonth_value = propertyValues.SearchForProperty(ProdMonth_DefId).Value.DisplayValue
+	Dim CountOfBats : CountOfBats = 0
+	
+	if(BatteryMulti_Defid >0 AND propertyValues.IndexOf(BatteryMulti_Defid) > 0 ) Then
+		CountOfBats = propertyValues.SearchForProperty(BatteryMulti_Defid).TypedValue.GetValueAsLookups().Count
+	End If		
+	
+	If (Battery_Value <> "" And State_Value <> "" And DocTypePA_Value <> "" And ProdYear_value <> "" And ProdMonth_value <> "") Then
+		IF (CountOfBats <2) Then
+			OutputValue = Battery_Value +"_"+ State_Value +"_"+ DocTypePA_Value +"_"+ProdYear_value +"_"+ ProdMonth_value 		
+		Else 
+			OutputValue = "MULTI_"+ State_Value +"_"+ DocTypePA_Value +"_"+ProdYear_value +"_"+ ProdMonth_value 
+		End If
+	Else
+		Err.Raise MFScriptCancel, "Please make sure you put a valid value for Battery, State, Docyment Type PA, Prod Year, and Prod Month"
+	End If	
+
+End If
+
+
+Output= OutputValue
+
+'============================================='
+'============= HELPER FUNCTIONS =============='
+'============================================='
+
+' creates a date with the format mm-dd-yyyy
+Function myDateFormat(myDate)
+    Dim d : d = FormatedDayOrMonth(Day(myDate))
+    Dim m : m = FormatedDayOrMonth(Month(myDate))    
+    Dim y : y = Year(myDate)
+    myDateFormat= m & "-" & d & "-" & y
+End Function
+
+' puts a 0 in front of the date or month if it is less then 10
+Function FormatedDayOrMonth(num)
+    If(Len(num)=1) Then
+        FormatedDayOrMonth="0"&num
+    Else
+        FormatedDayOrMonth=num
+    End If
+End Function

@@ -1,0 +1,62 @@
+'''GOAL: THIS SCRIPT TRIGGERS FOR THE "PLANS, POLICIES, AND PROCEDURES" CLASS. IT WILL UPDATE THE METADATA CARD AND POPULATE
+''' THE EHS FACILITY FIELD WITH ALL THE FACILTIES THAT BELONG TO A SPECIFIC PORTFOLIO
+'''
+'''CREATED BY : ANTOINE IBRAHIM
+'''VERSION : 1.0
+'''LAST MODIFIED: 12/16/2019
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+' GET THE DEF ID'S FOR ALL THE PROPERTIES, CLASSES, AND VALUE LISTS OF INTEREST ON THE CURRENT METADTA CARD 
+Dim EhsPortfolioName_Defid : EhsPortfolioName_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.EHS-Portfolio")
+Dim EhsFacility_DefID : EhsFacility_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.EHS-Facility")
+Dim EhsFacilityVL_DefId : EhsFacilityVL_DefId = Vault.ValueListOperations.GetValueListIDByAlias("VL.EHS-Facility")
+
+' GET THE DEF ID'S FOR THE CLASSES OF INTEREST (DIGITAL WELL FILES)
+Dim PPP_Class_DefID : PPP_Class_DefID = Vault.ClassOperations.GetObjectClassIDByAlias( "Class.Document.PlansPoliciesProcedures" )
+Const Class_DefID = 100
+
+' Get the properties of the object.
+dim PropertyVals : set PropertyVals = Vault.ObjectPropertyOperations.GetProperties( ObjVer, false )
+
+Dim CurrentClass_DefID : CurrentClass_DefID =Vault.ObjectPropertyOperations.GetProperty( ObjVer, Class_DefID ).Value.GetLookupID()
+' IF THE CLASS OF THE CURRENT OBJECT BEING CHECKDED IS "PLANS, POLICIES, AND PROCEDURES" CONTINUE WITH FUNCTIONALITY 
+If (CurrentClass_DefID = PPP_Class_DefID ) Then
+	if (PropertyVals.IndexOf(EhsPortfolioName_Defid) <> -1 ) Then
+		Dim portfolio_Lookup : portfolio_Lookup = PropertyVals.SearchForProperty(EhsPortfolioName_Defid).Value.GetLookupID()
+		'get list of facilitys that are children of portfolio
+		Dim FacilitiesList : Set FacilitiesList =SearchForVLItemsWithParent( EhsFacilityVL_DefId, portfolio_Lookup)
+		'add them the facility property and put them on the metadata card.
+		Dim oPropertyValueCondition : Set oPropertyValueCondition = CreateObject("MFilesAPI.PropertyValue")
+		oPropertyValueCondition.PropertyDef = EhsFacility_DefID
+
+		oPropertyValueCondition.Value.SetValue MFDatatypeMultiSelectLookup, FacilitiesList.ToArray
+		vault.ObjectPropertyOperations.SetProperty ObjVer, oPropertyValueCondition
+	End if
+End If
+
+
+Function SearchForVLItemsWithParent(ValueList_DefID, OwnerLookup)
+	'search condition for the owner of the lookup we are searching for
+	Dim ListOfChildren : Set ListOfChildren = CreateObject("System.Collections.ArrayList")
+	
+	Dim oSearchConditions : Set oSearchConditions = CreateObject("MFilesAPI.SearchConditions")
+	Dim oOwnerSearchCondition : Set oOwnerSearchCondition = CreateObject("MFilesAPI.SearchCondition")
+	oOwnerSearchCondition.Expression.SetValueListItemExpression MFValueListItemPropertyDefOwner,MFParentChildBehaviorNone, Nothing
+	oOwnerSearchCondition.ConditionType = MFConditionTypeEqual 
+	oOwnerSearchCondition.TypedValue.SetValue MFDatatypeLookup, OwnerLookup
+	oSearchConditions.Add -1, oOwnerSearchCondition 
+
+	'get only non deleted items
+	Dim NotDeletedCondition : Set NotDeletedCondition = CreateObject("MFilesAPI.SearchCondition")
+	NotDeletedCondition.Expression.SetValueListItemExpression MFValueListItemPropertyDefDeleted, MFParentChildBehaviorNone, Nothing
+	NotDeletedCondition.ConditionType = MFConditionTypeEqual
+	NotDeletedCondition.TypedValue.SetValue MFDatatypeBoolean, false	
+	oSearchConditions.Add -1, NotDeletedCondition
+
+	Dim Results : set Results = vault.ValueListItemOperations.SearchForValueListItemsEx(ValueList_DefID, oSearchConditions)
+	
+	for each facilityItem in Results
+		ListOfChildren.Add facilityItem.ID
+	Next
+	set SearchForVLItemsWithParent = ListOfChildren
+End Function

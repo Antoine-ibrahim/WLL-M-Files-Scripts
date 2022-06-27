@@ -1,0 +1,211 @@
+'''GOAL: THIS SCRIPT TRIGGERS FOR THE "DIVISION ORDER TRANSFER OR PAYCODE CHANGE REQUEST" CLASS. 
+'''IT WILL UPDATE THE NAME OR TITLE FIELD BY CONCATENATING THE APPROPRIATE PROPERTIES 
+'''
+'''CREATED BY : ANTOINE IBRAHIM
+'''VERSION : 1.1: Added Prospect to checklist, and added logic to only add DOFP if it has a value. 
+'''LAST MODIFIED: 10/25/2021
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+' GET THE DEF ID'S FOR ALL THE PROPERTIES OF INTEREST ON THE CURRENT METADTA CARD 
+Dim ChangeType_Defid : ChangeType_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.ChangeType")
+Dim JibNum_Defid : JibNum_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("PD.JibDeckNumber")
+Dim RevNum_Defid : RevNum_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("PD.REVDeckNumber")
+Dim BOLOWPCID_Defid : BOLOWPCID_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.BOLOWPCID.single")
+Dim DeckType_Defid : DeckType_Defid = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("PD.DeckType")
+Dim IndexDate_DefID : IndexDate_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.IndexDate.timestamp")
+
+' GET THE DEF ID'S FOR THE CLASSES OF INTEREST (DOWF)
+Dim DOWF_Class_DefID : DOWF_Class_DefID = Vault.ClassOperations.GetObjectClassIDByAlias( "Class.DivisionOrderTransferOrPaycodeChangeRequest" )
+Const Class_DefID = 100
+Dim NewDocName : NewDocName = ""
+Dim isNameEmpty : isNameEmpty = true 
+
+' GET THE CURRENT DATE LOCAL TIME, NOT UTC
+Set dateTime = CreateObject("WbemScripting.SWbemDateTime")    
+dateTime.SetVarDate (now())
+Dim TodaysDate : TodaysDate = Replace(FormatDateTime(dateTime.GetVarDate(false) ,2),"/","-")
+
+Dim PropertyVals : set PropertyVals = Vault.ObjectPropertyOperations.GetProperties( ObjVer, false )
+Dim CurrentClass_DefID : CurrentClass_DefID =Vault.ObjectPropertyOperations.GetProperty( ObjVer, Class_DefID ).Value.GetLookupID()
+
+' IF THE CLASS OF THE CURRENT OBJECT BEING CHECKDED IS "DIVISION ORDER TRANS OR PC REQUEST" CONTINUE WITH FUNCTIONALITY 
+If (CurrentClass_DefID = DOWF_Class_DefID ) Then	
+	If (PropertyVals.IndexOf(DeckType_Defid) > -1 And PropertyVals.IndexOf(ChangeType_Defid) > -1 ) Then 
+		DeckType_Val = PropertyVals.SearchForProperty(DeckType_Defid).Value.DisplayValue	
+		ChangeType_Val = PropertyVals.SearchForProperty(ChangeType_Defid).Value.DisplayValue		
+		
+		'Process only if one of the specific change types
+		IF ChangeType_Val = "3. Whiting Interest Change" OR ChangeType_Val = "4. Non-Whiting Interest Change" OR ChangeType_Val = "5. Component Change" OR ChangeType_Val = "6. Payout Change" OR ChangeType_Val = "7. New Deck Request" Then 	
+
+			if (DeckType_Val ="JIB") Then 
+				NewDocName = GetValtoAppend(ChangeType_Defid,0) + GetValtoAppend(JibNum_Defid,-1) + GetValtoAppend(BOLOWPCID_Defid,-1) +"_" + TodaysDate + GetDuplicateSuffix("JIB")
+			ElseIf (DeckType_Val ="REV") Then
+				NewDocName = GetValtoAppend(ChangeType_Defid,0) + GetValtoAppend(RevNum_Defid,-1) + GetValtoAppend(BOLOWPCID_Defid,-1) +"_" + TodaysDate + GetDuplicateSuffix("REV")
+			Else
+				NewDocName = GetValtoAppend(ChangeType_Defid,0) + GetValtoAppend(RevNum_Defid,-1) + GetValtoAppend(JibNum_Defid,-1) + GetValtoAppend(BOLOWPCID_Defid,-1) +"_" + TodaysDate + GetDuplicateSuffix("JIB-REV")
+			End If	
+
+			' IF THE NAME OR TITLE PROPERTY IS ON THE METADATA CARD, THEN PROCEDE AND UPDATE THE NAME OR TITLE FIELD WITH THE VALUE 
+			IF PropertyVals.IndexOf(0) > -1 Then
+				dim NameOrTitleProp : set NameOrTitleProp = PropertyVals.SearchForProperty(0)			'
+				NameOrTitleProp.Value.SetValue MFDatatypeText, NewDocName
+				Vault.ObjectPropertyOperations.SetProperty ObjVer, NameOrTitleProp
+			End IF 		
+
+			'MAKE SURE THE MODIFIED BY USER, IS THE CURRENT USER 
+			Const ModifiedBy = 23
+			Dim lastModifiedVal : Set lastModifiedVal = CreateObject("MFilesAPI.TypedValue")
+			lastModifiedVal.Value = Now
+			Dim SetModifiedToCurrentUser : set SetModifiedToCurrentUser =Vault.ObjectPropertyOperations.SetLastModificationInfoAdmin (ObjVer, True, PropertyVals.SearchForProperty(ModifiedBy).Value , True, lastModifiedVal)
+			
+		End If
+	End If
+End If
+
+'============================================='
+'============= HELPER FUNCTIONS =============='
+'============================================='
+
+' THIS FUNCTION TAKES IN A DATA ID AND A LENGTH AND RETURNS VALUE THAT NEEDS TO BE APPENDED TO THE NAME OR TITLE FIELD 
+public Function GetValtoAppend(PropIdOfInterest, length)
+	Dim ValueToAppend : ValueToAppend =  ""
+	If PropertyVals.IndexOf(PropIdOfInterest) > -1 Then
+		Dim valueOfProp : valueOfProp = PropertyVals.SearchForProperty(PropIdOfInterest).Value.DisplayValue
+		If valueOfProp <> "" Then 
+			If(PropIdOfInterest = JibNum_Defid) then
+				valueOfProp = "J" & valueOfProp 
+			end If 
+			If(PropIdOfInterest = RevNum_Defid) then
+				valueOfProp = "R" & valueOfProp 
+			end if			
+			If (length >1 ) then 
+				If isNameEmpty = false Then
+					ValueToAppend = "_"+ Mid(valueOfProp, 1, length)
+				Else
+					ValueToAppend = Mid(valueOfProp, 1, length)
+				End If
+			ElseIf (length =0) Then
+				ValueToAppend = GetWorkflowAbreviation( valueOfProp)
+			else 
+				If isNameEmpty = false Then
+					ValueToAppend = "_"+ valueOfProp
+				Else
+					ValueToAppend = valueOfProp
+				End If				
+			end if 
+			isNameEmpty= false
+		End if	
+	End If 	
+	GetValtoAppend = ValueToAppend
+End Function
+
+' THIS FUNCTION RETURNS THE ABREVIATION VALUE OF THE CHANGE TYPE 
+Function GetWorkflowAbreviation (WfType)
+	Dim WF_Abreviations : Set WF_Abreviations = CreateObject("Scripting.Dictionary")
+	WF_Abreviations.CompareMode = vbTextCompare
+	
+	Dim abbreviation : abbreviation =""
+	
+	WF_Abreviations.Add "3. Whiting Interest Change", "WIC"
+	WF_Abreviations.Add "4. Non-Whiting Interest Change", "NWIC"
+	WF_Abreviations.Add "5. Component Change", "CPC"
+	WF_Abreviations.Add "6. Payout Change", "PYC"
+	WF_Abreviations.Add "7. New Deck Request", "NDR"
+	
+	if WF_Abreviations.Exists(WfType) Then
+		abbreviation = WF_Abreviations.Item(WfType)
+	End If
+	GetWorkflowAbreviation = abbreviation
+End Function
+
+'THIS FUNCTION SEARCHES IF THERE IS AN DOWF WITH THE SAME VALUES, AND IF THERE IS,IT RETURNS A SUFFIX TO APPEND TO INDICATE IT IS A DUPLICATE EX _1
+public Function GetDuplicateSuffix(DeckType)
+	Dim ValueToAppend : ValueToAppend =  ""
+	Dim oSearchConditions : Set oSearchConditions = CreateObject("MFilesAPI.SearchConditions")
+	
+	'class search condition
+	Dim oClassSearchCondition : Set oClassSearchCondition = GetSearchConditionForLookupByID(100, DOWF_Class_DefID)
+	oSearchConditions.Add -1, oClassSearchCondition
+	
+	'JIB search condition
+	if (DeckType = "JIB" OR DeckType = "JIB-REV" ) Then
+		Dim JIBSearchCondition : Set JIBSearchCondition = CreateObject("MFilesAPI.SearchCondition")
+		JIBSearchCondition.Expression.SetPropertyValueExpression JibNum_Defid, MFParentChildBehaviorNone, Nothing
+		JIBSearchCondition.ConditionType = MFConditionTypeEqual 
+		JIBSearchCondition.TypedValue.SetValue MFDatatypeText, PropertyVals.SearchForProperty(JibNum_Defid).Value.DisplayValue
+		oSearchConditions.Add -1, JIBSearchCondition 
+	End IF 
+	
+	'rev search condition
+	if (DeckType = "REV" OR DeckType = "JIB-REV" ) Then
+		Dim REVSearchCondition : Set REVSearchCondition = CreateObject("MFilesAPI.SearchCondition")
+		REVSearchCondition.Expression.SetPropertyValueExpression RevNum_Defid, MFParentChildBehaviorNone, Nothing
+		REVSearchCondition.ConditionType = MFConditionTypeEqual 
+		REVSearchCondition.TypedValue.SetValue MFDatatypeText, PropertyVals.SearchForProperty(RevNum_Defid).Value.DisplayValue
+		oSearchConditions.Add -1, REVSearchCondition 
+	End IF 
+	
+	'ChangeType Condition
+	Dim ChangeTypeSearchCondition : Set ChangeTypeSearchCondition = CreateObject("MFilesAPI.SearchCondition")
+	ChangeTypeSearchCondition.Expression.SetPropertyValueExpression ChangeType_Defid, MFParentChildBehaviorNone, Nothing
+	ChangeTypeSearchCondition.ConditionType = MFConditionTypeEqual 
+	ChangeTypeSearchCondition.TypedValue.SetValue MFDatatypeText, PropertyVals.SearchForProperty(ChangeType_Defid).Value.DisplayValue
+	oSearchConditions.Add -1, ChangeTypeSearchCondition
+
+	'WPCIDType Condition
+	Dim WPCIDSearchCondition : Set WPCIDSearchCondition = CreateObject("MFilesAPI.SearchCondition")
+	WPCIDSearchCondition.Expression.SetPropertyValueExpression BOLOWPCID_Defid, MFParentChildBehaviorNone, Nothing
+	WPCIDSearchCondition.ConditionType = MFConditionTypeEqual 
+	WPCIDSearchCondition.TypedValue.SetValue MFDatatypeText, PropertyVals.SearchForProperty(BOLOWPCID_Defid).Value.DisplayValue
+	oSearchConditions.Add -1, WPCIDSearchCondition
+
+	'DeckType Condition
+	Dim DeckTypeSearchCondition : Set DeckTypeSearchCondition = CreateObject("MFilesAPI.SearchCondition")
+	DeckTypeSearchCondition.Expression.SetPropertyValueExpression DeckType_Defid, MFParentChildBehaviorNone, Nothing
+	DeckTypeSearchCondition.ConditionType = MFConditionTypeEqual 
+	DeckTypeSearchCondition.TypedValue.SetValue MFDatatypeText, PropertyVals.SearchForProperty(DeckType_Defid).Value.DisplayValue
+	oSearchConditions.Add -1, DeckTypeSearchCondition
+
+	'IndexDate Condition
+	Dim IndexDateSearchCondition : Set IndexDateSearchCondition = CreateObject("MFilesAPI.SearchCondition")
+	IndexDateSearchCondition.Expression.SetPropertyValueExpression IndexDate_DefID, MFParentChildBehaviorNone, Nothing
+	IndexDateSearchCondition.ConditionType = MFConditionTypeGreaterThan 
+	IndexDateSearchCondition.TypedValue.SetValue MFDatatypeTimestamp, cdate(TodaysDate)
+	oSearchConditions.Add -1, IndexDateSearchCondition
+	
+	'get only non deleted items
+	Dim NotDeletedCondition : Set NotDeletedCondition = CreateObject("MFilesAPI.SearchCondition")
+	NotDeletedCondition.Expression.SetStatusValueExpression MFStatusType.MFStatusTypeDeleted, Nothing
+	NotDeletedCondition.ConditionType = MFConditionTypeEqual
+	NotDeletedCondition.TypedValue.SetValue MFDatatypeBoolean, false	
+	oSearchConditions.Add -1, NotDeletedCondition
+
+	
+	Dim oSearchResults : set oSearchResults = Vault.ObjectSearchOperations.SearchForObjectsByConditions(oSearchConditions, 0, false)
+	AutomationRuleExists = oSearchResults.Count > 0
+	
+	If (oSearchResults.Count >1) Then
+		ValueToAppend ="_"+ Cstr(oSearchResults.Count-1)
+	End If
+
+	GetDuplicateSuffix = ValueToAppend
+End Function
+
+
+'CREATES A SEARCH CONDITION FOR A LOOKUP BY ID
+public Function GetSearchConditionForLookupByID(PropertyDefID, lookupInternalId)
+	
+	' Create a lookup referencing this class ID.
+	Dim oLookup : Set oLookup = CreateObject("MFilesAPI.Lookup")
+	oLookup.Item = lookupInternalId
+
+	' Define the search condition.'
+	Dim oSearchCondition : Set oSearchCondition = CreateObject("MFilesAPI.SearchCondition")
+	oSearchCondition.Expression.SetPropertyValueExpression PropertyDefID, MFParentChildBehaviorNone, Nothing
+	oSearchCondition.ConditionType = 1
+	'oSearchCondition.TypedValue = oPropertyValue
+	oSearchCondition.TypedValue.SetValueToLookup(oLookup)
+
+	' Return the search condition.'
+	Set GetSearchConditionForLookupByID = oSearchCondition
+End Function

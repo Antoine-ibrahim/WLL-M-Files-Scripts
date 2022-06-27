@@ -1,0 +1,24 @@
+
+'get the defid for rc process
+Const Class_DefID = 100
+
+
+' GET THE DEF ID'S FOR THE CLASSES OF INTEREST (CHECKLIST AND RC PROCESS)
+Dim RCProcess_Class_DefID : RCProcess_Class_DefID = Vault.ClassOperations.GetObjectClassIDByAlias( "Class.DBUpdater" )
+
+
+' IF THE CLASS OF THE CURRENT OBJECT BEING CHECKDED IN RC PROCESS THEN CONTINUE WITH FUNCTIONALITY 
+If Vault.ObjectPropertyOperations.GetProperty( ObjVer, Class_DefID ).Value.GetLookupID() = RCProcess_Class_DefID Then
+
+	Const DB_CONNECT_STRING = "Provider=SQLOLEDB.1;Password={password};Persist Security Info=True;User ID={username};Initial Catalog=M-Files;Data Source={source}"						   
+	Dim myConn : Set myConn = CreateObject("ADODB.Connection")
+	Dim myCommand : Set myCommand = CreateObject("ADODB.Command" )
+	
+	myConn.Open DB_CONNECT_STRING
+	
+	Set myCommand.ActiveConnection = myConn
+	myCommand.CommandText = "insert into EventHandlerTest (Value) Values ('test'+ltrim(rtrim(str((select count(1) from EventHandlerTest)))))"
+	myCommand.Execute
+	myConn.Close
+
+End if

@@ -1,0 +1,502 @@
+'''GOAL: THIS SCRIPT TRIGGERS ON THE LAST STEP OF THE "RC RULES CONFIRMATION" WORKFLOW. AFTER THE USER CONFIRMS ALL THE DATA IN THE METADATA CARD, AND CONFIRMS
+''' THE SUGGESTED LIST OF WORKFLOWS, THIS STEP INITIATES IN ORDER TO GENERATE THE RC PROCESS OBJECTS SPECIFIED, AND INITIAING THE CORRECT WORKFLOWS. iT GENERATES AN 
+''' RC PROCESS OBJECT FOR EACH WORKFLOW (ONLY IF IT DOESNT ALREADY EXIST), AND ATTACHES THE CORRECT WORKFLOW TO THE OBJECT AS WELL AS ADDS ALL THE METADATA ASSOCIATED, 
+''' WITH THE WELL, AND RC PROCESS DEFINITION OBJECTS. THIS SCRIPT IS MEANT TO SAVE THE LONG MANUAL STEP OF GENERATING UP TO 15 WORKFLOWS RC PROCESS OBJECTS
+''' AND POPULATING THE LONG LIST OF METADATA FOR EVERY NEW WELL ADDED TO THE SYSTEM.
+''' 
+'''
+'''
+'''CREATED BY : ANTOINE IBRAHIM
+'''VERSION : 1.1
+''' v1.1: fixed (deleted wells displaying for padname, dublicate wells "already exists" error ) 
+'''LAST MODIFIED: 12/03/2019
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+Dim WFMulti_DefID : WFMulti_DefID =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.ChooseWorkflowMulti")
+Dim WFSingle_DefID : WFSingle_DefID =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.ChooseWorkflow")
+Dim WellSingle_DefID : WellSingle_DefID =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.Well.Single")
+Dim WellMulti_DefID : WellMulti_DefID =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.Well.Multi")
+Dim Agency_DefID : Agency_DefID =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.Agency")
+Dim RCSubmittalType_DefId : RCSubmittalType_DefId = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.SubmittalType")
+Dim RcProcessDefinition_DefId : RcProcessDefinition_DefId = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.RegulatoryProcessDefinition")
+Dim Form_DefID : Form_DefID =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.Form")
+Dim UsState_DefID : UsState_DefID =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.State.single")
+Dim Prospect_DefID : Prospect_DefID =Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.VL.Prospect")
+Dim Dofp_DefID : Dofp_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.DOFP")
+Dim EstimatedDofp_DefID : EstimatedDofp_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.EstimatedDOFP")
+Dim Wildcat_DefID : Wildcat_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.Wildcat")
+Dim EstFracStartDate_DefID : EstFracStartDate_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.EstimatedFracStartDate")
+Dim OwnerShipType_DefID : OwnerShipType_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.OwnershipType")
+Dim EngConfRequest_DefID : EngConfRequest_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.EngineerConfidentialityRequest.Q")
+Dim WellGasConection_DefID : WellGasConection_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.WellGasConnection.Q")
+Dim FracString_DefID : FracString_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.FracString.Q")
+Dim RcOwner_DefID : RcOwner_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.OwnerGroup")
+Dim PadName_DefId : PadName_DefId  = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.Pad")
+Dim SubmittalDesc_DefId : SubmittalDesc_DefId  = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.SubmittalDescription")
+
+Dim Message : Message = ""
+' OBJECTS OF INTEREST
+Dim RCProcess_ObjID : RCProcess_ObjID = Vault.ObjectTypeOperations.GetObjectTypeIDByAlias("Object.RCProcess")
+
+Dim isValidBackbone : isValidBackbone = true
+' value list def ids 
+Dim AgencyVL_DefId : AgencyVL_DefId = Vault.ValueListOperations.GetValueListIDByAlias("VL.Agencies")
+
+'GET THE PROPERTY VALUES FOR THE CURRENT AND LAST VERSION 
+Dim PropertyVals : set PropertyVals = Vault.ObjectPropertyOperations.GetProperties( ObjVer, false ) 
+
+'Get defids for classes and properties we are interested in 
+Dim RCProcess_Class_DefID : RCProcess_Class_DefID = Vault.ClassOperations.GetObjectClassIDByAlias( "Class.WF.RCProcess" )
+Dim Well_Class_DefId : Well_Class_DefId = Vault.ClassOperations.GetObjectClassIDByAlias( "Class.Well" ) 
+Dim RcProcessDef_Class_DefId : RcProcessDef_Class_DefId = Vault.ClassOperations.GetObjectClassIDByAlias( "Class.WF.RegulatoryProcessDefinition")
+
+' only proceded if both the wfMulti, Well, agency, and submittal type are on the metadata card. 
+IF PropertyVals.IndexOf(WFMulti_DefID) > -1 And PropertyVals.IndexOf(WellSingle_DefID) > -1 And PropertyVals.IndexOf(Agency_DefID) > -1 And PropertyVals.IndexOf(RCSubmittalType_DefId) > -1 Then
+
+	Dim NumOfWfs : NumOfWfs = PropertyVals.SearchForProperty(WFMulti_DefID).TypedValue.GetValueAsLookups().Count
+	Dim WellValue : WellValue = PropertyVals.SearchForProperty(WellSingle_DefID).Value.DisplayValue
+	Dim AgencyValue : AgencyValue = PropertyVals.SearchForProperty(Agency_DefID).Value.DisplayValue
+	Dim SubmittalValue : SubmittalValue = PropertyVals.SearchForProperty(RCSubmittalType_DefId).Value.DisplayValue
+	
+	' Only process if there are selected wells, and agency/well are not empty
+	If(NumOfWfs > 0 And WellValue <> "" And AgencyValue <> "" And SubmittalValue <> "" ) Then 
+		Dim Well_Id : Well_Id = PropertyVals.SearchForProperty(WellSingle_DefID).TypedValue.GetValueAsLookup().Item
+		Dim Agency_Id : Agency_Id = PropertyVals.SearchForProperty(Agency_DefID).TypedValue.GetValueAsLookup().Item
+		Dim Submittal_Id : Submittal_Id = PropertyVals.SearchForProperty(RCSubmittalType_DefId).TypedValue.GetValueAsLookup().Item
+		' GETS A LIST OF WFS NEEDED
+		Dim wflows : set wflows = PropertyVals.SearchForProperty(WFMulti_DefID).TypedValue.GetValueAsLookups()
+		' FOR EVERY WF SPECIFIED , IT GENERATES AN RC PROCESS, IF ONE DOES NOT ALREADY EXIST
+		for each item in  wflows 
+			Dim wfID : wfID = item.Item
+			Dim wfValue : wfValue = item.DisplayValue
+			Message =Message & "in for loop: " & wfValue & ", "
+			if (SearchForRcProcess(wfID , Well_Id, WellSingle_DefID ) = 0 AND SearchForRcProcess(wfID , Well_Id, WellMulti_DefID ) =0) Then
+				Message = Message & "in sfRPD: " & wfValue & ", "
+				GenerateRcProcess wfID , Well_Id, Agency_Id, wfValue, Submittal_Id
+			End If
+		Next
+		'Err.Raise MFScriptCancel, Message
+	End If
+End If
+
+
+'============================================='
+'============= HELPER FUNCTIONS =============='
+'============================================='
+
+
+'THIS FUNCTION SEARCHES TO SEE IF THERE IS A SPECIFIED RC PROCESS THAT ALREADY EXISTS FOR THE SPECIFIC WELL 
+Function SearchForRcProcess(WorkflowId, selectedWell, SingleOrMultiWell_DefID)
+	'CREATE A SEARCH CONDITION FOR THE CHECKLIST CLASS, AND SELECTED WELL 		
+	Dim oSearchConditions : Set oSearchConditions = CreateObject("MFilesAPI.SearchConditions")
+	Dim oClassSearchCondition : Set oClassSearchCondition = GetSearchConditionForLookupByID(100, RCProcess_Class_DefID)
+	oSearchConditions.Add -1, oClassSearchCondition
+
+	Dim oWellSearchCondition : Set oWellSearchCondition = GetSearchConditionForLookupByID(SingleOrMultiWell_DefID, selectedWell)
+	oSearchConditions.Add -1, oWellSearchCondition
+
+	Dim oWfSearchCondition : Set oWfSearchCondition = GetSearchConditionForLookupByID(WFSingle_DefID, WorkflowId)
+	oSearchConditions.Add -1, oWfSearchCondition
+		
+	' RUN THE SEARCH.
+	Dim oSearchResults : set oSearchResults = Vault.ObjectSearchOperations.SearchForObjectsByConditions(oSearchConditions, 0, false)
+'	Err.Raise MFScriptCancel,  "RCProcess_Class_DefID: "& RCProcess_Class_DefID & " WellSingle_DefID: "& WellSingle_DefID &" selectedWell:"& selectedWell &" WorkflowId:"& WorkflowId &" Count:"& oSearchResults.Count
+	
+	SearchForRcProcess = oSearchResults.Count
+End Function
+
+
+'GENERATE THE rc PROCESS IF THERE IS A PROCESS DIFINITION THAT EXISTS 
+public Function GenerateRcProcess (WorkflowId, selectedWell, selectedAgency, WfVal, SelectedSubmittalType)
+	' GET THE PROPERTIES FOR THE SELECTED WELL OBJECT ON THE METADATA CARD.	We need to retrieve some info from this
+	Dim Well_ObjVer : set Well_ObjVer = PropertyVals.SearchForProperty(WellSingle_DefID).TypedValue.GetValueAsLookup().GetAsObjVer()
+	set Well_ObjVer = vault.ObjectOperations.GetLatestObjVer(Well_ObjVer.ObjID, true, false)
+	Dim Well_objVerAndProps : set Well_objVerAndProps =  Vault.ObjectOperations.GetObjectVersionAndProperties(Well_ObjVer, false)	
+	'Message =Message & "in Generate: " & wfValue & ", "
+	'Get the Process Definition For the RC process we need to initiate, only process if it finds one 
+	Dim ProcessDefinitions  : set ProcessDefinitions = GetProcessDefinition (WorkflowId,selectedAgency, WfVal, SelectedSubmittalType )
+	
+	If (ProcessDefinitions.Count>0) Then 
+		Dim processDef_ObVerAndProps : set processDef_ObVerAndProps =Vault.ObjectOperations.GetObjectVersionAndProperties(ProcessDefinitions(1).ObjVer, false)
+		' create the actual RC Process 
+		Message =Message & "in Create: " & wfValue & ", "
+		CreateRCProcessObjectInMfiles processDef_ObVerAndProps, Well_objVerAndProps, WfVal, WorkflowId, selectedWell
+	End If
+End Function
+
+' ACTUALLY GENERATE THE RC PROCESS OBJECT IN MFILES AND ATTACHES THE WF AND ALL THE PROPERTY VALUES FOR THAT PROCESS. 
+Function CreateRCProcessObjectInMfiles(processDefinition_ObVerAndProps, Well_objectVerAndProps, WfVal, wfID, selectedWell)
+	' get all the group properties def id 	
+	Dim EngTech_DefID : EngTech_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.EngTechSupportGroup")
+	Dim MarketSup_DefID : MarketSup_DefID = Vault.PropertyDefOperations.GetPropertyDefIDByAlias("Property.RC.MarketingSupportGroup")
+
+
+	Dim oPropertyValues  : Set oPropertyValues  = CreateObject("MFilesAPI.PropertyValues")
+	' get the property values for the the WELL object and Regulatory Process Definition object 
+	Dim WellProperties : set WellProperties = Well_objectVerAndProps.Properties 
+	Dim DefinitionProperties : set DefinitionProperties = processDefinition_ObVerAndProps.Properties 
+
+	Set oPropertyValues = GetBackbonePropertyVals( processDefinition_ObVerAndProps, Well_objectVerAndProps, oPropertyValues , WfVal, wfID, WellProperties, DefinitionProperties, selectedWell)
+	
+'	Err.Raise MFScriptCancel, "isValidBackbone:" & isValidBackbone & " owner def ID:"&RcOwner_DefID&" owner index" & oPropertyValues.IndexOf(RcOwner_DefID)' & " owner:" &  oPropertyValues.SearchForProperty(RcOwner_DefID).Value.DisplayValue
+
+
+	if (isValidBackbone) Then
+
+		if (WfVal = "Authorization to Transport" OR WfVal = "Completion Report" OR WfVal = "BLM Completion Report" OR WfVal = "First Production Notice" OR WfVal = "Flare Gas Sundry" OR WfVal = "Gas Oil Ratio Report"  ) Then
+			'propvals.DOFP
+			If PropertyVals.IndexOf(Dofp_DefID) > -1 Then
+				Dim DofpProp : set DofpProp = PropertyVals( PropertyVals.IndexOf(Dofp_DefID) )
+				oPropertyValues.Add -1, DofpProp
+			End if
+		End if
+	
+		'propvals.EstimatedDofpProp
+		if (WfVal = "Authorization to Transport" OR WfVal = "Commingle Sundry" OR WfVal = "Confidentiality Request" OR WfVal = "Flare Gas Sundry" OR WfVal = "LACT Install/Removal" OR WfVal = "Notification of Frac"  ) Then
+			If PropertyVals.IndexOf(EstimatedDofp_DefID) > -1 Then
+				Dim EstimatedDofpProp : set EstimatedDofpProp = PropertyVals( PropertyVals.IndexOf(EstimatedDofp_DefID) )
+				oPropertyValues.Add -1, EstimatedDofpProp
+			End if
+		End if
+	
+		' MarketSupGroup_Prop
+		if (WfVal = "Authorization to Transport" OR WfVal = "Flare Gas Sundry"   ) Then
+			If WellProperties.IndexOf(MarketSup_DefID) > -1 Then
+				Dim MarketSupGroup_Prop : set MarketSupGroup_Prop = WellProperties( WellProperties.IndexOf(MarketSup_DefID) )
+				oPropertyValues.Add -1, MarketSupGroup_Prop
+			End if
+		End If
+	
+		' EngTechGroup_Prop
+		if (WfVal = "Completion Report" OR WfVal = "BLM Completion Report" OR WfVal = "First Production Notice" OR WfVal = "Gas Oil Ratio Report"    ) Then
+			If WellProperties.IndexOf(EngTech_DefID) > -1 Then
+				Dim EngTechGroup_Prop : set EngTechGroup_Prop = WellProperties( WellProperties.IndexOf(EngTech_DefID) )
+				oPropertyValues.Add -1, EngTechGroup_Prop
+			End if
+		End if
+	
+		'propvals.WildCat
+		if (WfVal = "Completion Report" OR WfVal = "BLM Completion Report" ) Then
+			If PropertyVals.IndexOf(Wildcat_DefID) > -1 Then
+				Dim WildCatProp : set WildCatProp = PropertyVals( PropertyVals.IndexOf(Wildcat_DefID) )
+				oPropertyValues.Add -1, WildCatProp
+			End if
+		End if
+	
+		'propvals.EstimatedFracStartDate
+		if (WfVal = "Casing Monitor Notice" OR WfVal = "Flow Up Casing Notice"  or WfVal = "Notification of Frac" ) Then
+			If PropertyVals.IndexOf(EstFracStartDate_DefID) > -1 Then
+				Dim EstFracStartDateProp : set EstFracStartDateProp = PropertyVals( PropertyVals.IndexOf(EstFracStartDate_DefID) )
+				oPropertyValues.Add -1, EstFracStartDateProp
+			End if
+		End if
+	
+		'propvals.OwnerShipType
+		if (WfVal = "Commingle Sundry"  ) Then
+			If PropertyVals.IndexOf(OwnerShipType_DefID) > -1 Then
+				Dim OwnershipTypeProp : set OwnershipTypeProp = PropertyVals( PropertyVals.IndexOf(OwnerShipType_DefID) )
+				oPropertyValues.Add -1, OwnershipTypeProp
+			End if
+		End if
+	
+		'propvals.Engineer Confidentiality request?
+		if (WfVal = "Confidentiality Request" ) Then
+			If PropertyVals.IndexOf(EngConfRequest_DefID) > -1 Then
+				Dim EngRequestProp : set EngRequestProp = PropertyVals( PropertyVals.IndexOf(EngConfRequest_DefID) )
+				oPropertyValues.Add -1, EngRequestProp
+			End if
+		End if
+	
+		'propvals.WellGas Connection
+		if (WfVal = "Flare Gas Sundry" ) Then
+			If PropertyVals.IndexOf(WellGasConection_DefID) > -1 Then
+				Dim WellGasConnProp : set WellGasConnProp = PropertyVals( PropertyVals.IndexOf(WellGasConection_DefID) )
+				oPropertyValues.Add -1, WellGasConnProp
+			End if
+		End if
+	
+		'propvals.Frac String
+		if (WfVal = "Flow Up Casing Notice") Then
+			If PropertyVals.IndexOf(FracString_DefID) > -1 Then
+				Dim FracStringProp : set FracStringProp = PropertyVals( PropertyVals.IndexOf(FracString_DefID) )
+				oPropertyValues.Add -1, FracStringProp
+			End if
+		End if
+		
+		'Propvals.Submittal description
+		if (WfVal = "Commingle Sundry" OR WfVal = "Gas Oil Ratio Report" OR WfVal = "LACT Install/Removal" OR WfVal = "Shared LACT Sundry" ) Then
+			If PropertyVals.IndexOf(SubmittalDesc_DefId) > -1 Then
+				Dim SubmittalDescProp : set SubmittalDescProp = PropertyVals( PropertyVals.IndexOf(SubmittalDesc_DefId) )
+				oPropertyValues.Add -1, SubmittalDescProp
+			End if
+		End If
+	
+		Dim AliasForWFToSet : AliasForWFToSet ="WF."& replace(replace(WfVal," ",""),"/","")
+
+		Dim wfIDForWFToSet : wfIDForWFToSet =vault.WorkflowOperations.GetWorkflowIDByAlias(AliasForWFToSet)
+		Dim WfState : WfState = vault.WorkflowOperations.GetWorkflowStateIDByAlias(AliasForWFToSet & ".Initial")
+		
+		If (wfIDForWFToSet <> -1)Then
+			Dim WFProp : set WFProp=  CreateObject("MFilesAPI.PropertyValue")
+			WFProp.PropertyDef = 38
+			WFProp.TypedValue.SetValue MFDataType.MFDatatypeLookup, wfIDForWFToSet 
+			oPropertyValues.Add -1, WFProp
+
+			If (WfState <> -1) Then 
+				Dim WfStateProp : set WfStateProp=  CreateObject("MFilesAPI.PropertyValue")
+				WfStateProp.PropertyDef = 39
+				WfStateProp.TypedValue.SetValue MFDataType.MFDatatypeLookup, WfState 
+				oPropertyValues.Add -1, WfStateProp
+			End If
+		End If
+
+		'Create the OBject in Mfiles 
+		Dim sourceFiles : set sourceFiles = CreateObject("MFilesAPI.SourceObjectFiles")
+		'On Error Resume Next
+		Dim oObjectVersionAndProperties : Set oObjectVersionAndProperties  = Vault.ObjectOperations.CreateNewObjectEx(RCProcess_ObjID, oPropertyValues,sourceFiles, false, true, nothing)
+		
+		'if Err Then
+		'	Err.Raise MFScriptCancel, WfVal
+		'End If
+
+	End If 
+End Function
+
+
+' SEARCHES THE VAULT TO SEE IF A PROCESS DEFINITION EXISTS FOT THE SPECIFIC WF, AND AGENCY COMBINATION
+public Function GetProcessDefinition (WorkflowId, selectedAgency,WfVal, SelectedSubmittalType )
+		'CREATE A SEARCH CONDITION FOR THE RC PROCESS DEFINITION CLASS, AND SPECIFIED AGENCY, WORKFLOW, AND SUBMITTAL TYPE	
+	Dim agencyToSearchBy : agencyToSearchBy = selectedAgency
+	Dim oSearchConditions : Set oSearchConditions = CreateObject("MFilesAPI.SearchConditions")
+	Dim oClassSearchCondition : Set oClassSearchCondition = GetSearchConditionForLookupByID(100, RcProcessDef_Class_DefId)
+	oSearchConditions.Add -1, oClassSearchCondition
+
+	Dim oWfSearchCondition : Set oWfSearchCondition = GetSearchConditionForLookupByID(WFSingle_DefID, WorkflowId)
+	oSearchConditions.Add -1, oWfSearchCondition
+	''======================================================================================================================
+	'TODO: need to add if statement to change selected agency value to BLM if WF is one of the federal ones. 
+	If WfVal ="BLM Completion Report" or WfVal = "First Production Notice" Then
+		agencyToSearchBy =SearchForVLItemByValue(AgencyVL_DefId, "BLM")
+	End If 
+	Dim oAgencySearchCondition : Set oAgencySearchCondition = GetSearchConditionForLookupByID(Agency_DefID, agencyToSearchBy)
+	oSearchConditions.Add -1, oAgencySearchCondition
+
+	'=======================================================================================================================
+	Dim oSubmittalSearchCondition : Set oSubmittalSearchCondition = GetSearchConditionForLookupByID(RCSubmittalType_DefId, SelectedSubmittalType)
+	oSearchConditions.Add -1, oSubmittalSearchCondition
+
+	' RUN THE SEARCH.
+	Dim oSearchResults : set oSearchResults = Vault.ObjectSearchOperations.SearchForObjectsByConditions(oSearchConditions, 0, false)
+	Message = Message & "in getting PD for "& WfVal &" &"&  selectedAgency & "or "& agencyToSearchBy & " Found " & oSearchResults.Count &" Results,"
+	Set GetProcessDefinition = oSearchResults
+End Function
+
+'CREATES A SEARCH CONDITION FOR A LOOKUP WITH A SPECIFIC LOOKUP ID 
+public Function GetSearchConditionForLookupByID(PropertyDefID, lookupInternalId)
+	
+	' Create a lookup referencing this class ID.
+	Dim oClassLookup : Set oClassLookup = CreateObject("MFilesAPI.Lookup")
+	oClassLookup.Item = lookupInternalId
+
+	' Define the search condition.'
+	Dim oSearchCondition : Set oSearchCondition = CreateObject("MFilesAPI.SearchCondition")
+	oSearchCondition.Expression.SetPropertyValueExpression PropertyDefID, MFParentChildBehaviorNone, Nothing
+	oSearchCondition.ConditionType = 1
+	'oSearchCondition.TypedValue = oPropertyValue
+	oSearchCondition.TypedValue.SetValueToLookup(oClassLookup)
+
+	' Return the search condition.'
+	Set GetSearchConditionForLookupByID = oSearchCondition
+
+End Function
+
+
+' GETS THE ID OF AN ITEM IN THE VALUE LIST BY USING ITS VALUE
+Function SearchForVLItemByValue(ValueList_DefID, ItemValue)
+	Dim  VLItemID : VLItemID = -1
+	
+	'search condition for the text value we are looking for 
+	Dim oSearchConditions : Set oSearchConditions = CreateObject("MFilesAPI.SearchConditions")
+	Dim oVLItemSearchCondition : Set oVLItemSearchCondition = CreateObject("MFilesAPI.SearchCondition")
+	oVLItemSearchCondition.Expression.SetValueListItemExpression MFValueListItemPropertyDefName,MFParentChildBehaviorNone, Nothing
+	oVLItemSearchCondition.ConditionType = MFConditionTypeEqual 
+	oVLItemSearchCondition.TypedValue.SetValue MFDatatypeText, ItemValue
+
+	oSearchConditions.Add -1, oVLItemSearchCondition 
+
+	'get only non deleted items
+	Dim NotDeletedCondition : Set NotDeletedCondition = CreateObject("MFilesAPI.SearchCondition")
+	NotDeletedCondition.Expression.SetValueListItemExpression MFValueListItemPropertyDefDeleted, MFParentChildBehaviorNone, Nothing
+	NotDeletedCondition.ConditionType = MFConditionTypeEqual
+	NotDeletedCondition.TypedValue.SetValue MFDatatypeBoolean, false	
+	oSearchConditions.Add -1, NotDeletedCondition
+
+	Dim Results : set Results = vault.ValueListItemOperations.SearchForValueListItemsEx(ValueList_DefID, oSearchConditions)
+	If Results.Count >0 Then 
+		VLItemID = Results(1).ID
+	End If
+
+	SearchForVLItemByValue = VLItemID
+End Function
+
+'GETS THE LIST OF GENERIC PROPERTY VALUES SHARED BY ALL RC PROCESS DEFINITIONS AND RETURNS A PROPERTYVALUES OBJECT
+public function GetBackbonePropertyVals( processDefinition_ObVerAndProps, Well_objectVerAndProps, RcPropertyVals , WfVal, wfID, WellProperties, DefinitionProperties, selectedWell)
+
+	Dim ClassProp : set ClassProp=  CreateObject("MFilesAPI.PropertyValue")
+	ClassProp.PropertyDef = MFilesAPI.MFBuiltInPropertyDef.MFBuiltInPropertyDefClass
+	ClassProp.TypedValue.SetValue MFDataType.MFDatatypeLookup, RCProcess_Class_DefID
+	RcPropertyVals.Add -1, ClassProp
+
+	Dim RcDefProp : set RcDefProp=  CreateObject("MFilesAPI.PropertyValue")
+	RcDefProp.PropertyDef = RcProcessDefinition_DefId
+	RcDefProp.TypedValue.SetValue MFDataType.MFDatatypeLookup, processDefinition_ObVerAndProps.ObjVer.ID 
+	RcPropertyVals.Add -1, RcDefProp
+	
+	'===============WELL single/multi here =================================
+	
+	' if not a commingling workflow, set to single well property
+	if (WfVal <> "Commingle Sundry"  And WfVal <> "Gas Oil Ratio Report"  And WfVal <> "LACT Install/Removal" And WfVal <>"Shared LACT Sundry" ) Then
+		Dim WellProp : set WellProp=  CreateObject("MFilesAPI.PropertyValue")
+		WellProp.PropertyDef = WellSingle_DefID
+		WellProp.TypedValue.SetValue MFDataType.MFDatatypeLookup, Well_objectVerAndProps.ObjVer.ID
+		RcPropertyVals.Add -1, WellProp
+	' else if its a miltiwell WF, set property to multiwell
+	Else
+		Dim Multi_WellProp : set Multi_WellProp =  CreateObject("MFilesAPI.PropertyValue")
+		Multi_WellProp.PropertyDef = WellMulti_DefID
+		Dim WellArrayList : Set WellArrayList = CreateObject("System.Collections.ArrayList")
+		WellArrayList.Add(Well_objectVerAndProps.ObjVer.ID)
+		
+		' if multiwell WF but not a gas oil ration WF, then get wells in the wellMulti list and add to list
+		If (WfVal = "Commingle Sundry" ) Then
+			If PropertyVals.IndexOf(WellMulti_DefID) > -1 Then
+				'get well count for multiwell property
+				Dim multi_wells_lookup : set multi_wells_lookup = PropertyVals.SearchForProperty(WellMulti_DefID).TypedValue.GetValueAsLookups()
+				' add them to the array list 
+				for each item_lookup in multi_wells_lookup
+					Dim wellID : wellID = item_lookup.Item
+					if not WellArrayList.Contains(wellID) Then
+						WellArrayList.Add(wellID)
+					End If
+				Next
+			End If
+		' If it is GAS OIL RATIO WF, get the multilist using padname 
+		Else
+			Dim WellsWithSamePadName : set WellsWithSamePadName = getAllWellsWithPadName(WellProperties.SearchForProperty(PadName_DefId).Value.DisplayValue, wfID)
+				For each item in WellsWithSamePadName
+					if not WellArrayList.Contains(item) Then
+						WellArrayList.Add(item)
+					End If
+				Next
+		End If 
+		Multi_WellProp.Value.SetValue MFDatatypeMultiSelectLookup, WellArrayList.ToArray()
+		RcPropertyVals.Add -1, Multi_WellProp
+	End If 
+	'END OF WELL PART
+	
+	'propvals.submittal type
+	If isPropertyValid(PropertyVals, RCSubmittalType_DefId) Then
+		Dim SubmittalTypeProp : set SubmittalTypeProp = PropertyVals( PropertyVals.IndexOf(RCSubmittalType_DefId) )
+		RcPropertyVals.Add -1, SubmittalTypeProp
+	End If
+
+	'DefinitionProps'workflow
+	If isPropertyValid(DefinitionProperties, WFSingle_DefID) Then 
+		Dim WorkflowProp : set WorkflowProp = DefinitionProperties( DefinitionProperties.IndexOf(WFSingle_DefID) )
+		RcPropertyVals.Add -1, WorkflowProp
+	End If
+
+	'DefinitionProps.agency
+	If isPropertyValid(DefinitionProperties, Agency_DefID) Then 
+		Dim AgencyProp : set AgencyProp = DefinitionProperties( DefinitionProperties.IndexOf(Agency_DefID) )
+		RcPropertyVals.Add -1, AgencyProp
+	End If
+
+	'DefinitionProps.form
+	If isPropertyValid(DefinitionProperties, Form_DefID) Then
+		Dim FormProp : set FormProp = DefinitionProperties( DefinitionProperties.IndexOf(Form_DefID) )
+		RcPropertyVals.Add -1, FormProp
+	End If
+
+	'propvals.state
+	If isPropertyValid(PropertyVals, UsState_DefID) Then 
+		Dim UsStateProp : set UsStateProp = PropertyVals( PropertyVals.IndexOf(UsState_DefID) )
+		RcPropertyVals.Add -1, UsStateProp
+	End If
+	
+	'well.Prospect_DefID
+	If isPropertyValid(WellProperties, Prospect_DefID) Then  
+		Dim ProspectProp : set ProspectProp = WellProperties( WellProperties.IndexOf(Prospect_DefID) )
+		RcPropertyVals.Add -1, ProspectProp
+	End If
+	
+	' add groups 
+	' RcOwnerGroup_Prop
+	If isPropertyValid(WellProperties, RcOwner_DefID) Then  
+		Dim RcOwnerGroup_Prop : set RcOwnerGroup_Prop = WellProperties( WellProperties.IndexOf(RcOwner_DefID) )
+		RcPropertyVals.Add -1, RcOwnerGroup_Prop
+	End If
+	
+	set GetBackbonePropertyVals = RcPropertyVals
+end function 
+
+public function isPropertyValid(pvalues, Pdefid)
+	Dim status : status = true 
+	If pvalues.IndexOf(Pdefid) > -1 Then
+		Dim pval : pval = pvalues.SearchForProperty(Pdefid).Value.DisplayValue
+		If (pval = "") then
+			status = false
+			isValidBackbone = false
+		End If 
+	Else
+		status = false
+		isValidBackbone = false
+	End If
+	isPropertyValid = status
+end Function
+
+' GETS ALL THE WELLS WITH THE SAME PAD NAME AND ADDS THEM TO THE LIST OF WELLS MULTI SELECT, IF THEY ARE NOT ALREADY ASSOCIATED WITH A WF 
+public function getAllWellsWithPadName(padName, wfID)
+	Dim WellWithPadNameArrayList : Set WellWithPadNameArrayList = CreateObject("System.Collections.ArrayList")
+	'if padname has a value, then check if other wells have that value 
+	if (padName <> "") Then
+		Dim wellsWithPadname : set wellsWithPadname = SearchForWellsWithPadName(padName)
+		' if found wells with padName, check if they already have a gas oil ration RC Process
+		if(wellsWithPadname.Count > 0) Then
+			For i = 1 To wellsWithPadname.Count Step 1
+				
+				Dim Well_Id : Well_Id = wellsWithPadname(i).ObjVer.ID
+				' if it does not already have a gas oil ration rc process, then add it to the list 
+				if (SearchForRcProcess(wfID , Well_Id, WellSingle_DefID ) = 0 AND SearchForRcProcess(wfID , Well_Id, WellMulti_DefID ) =0) Then
+					WellWithPadNameArrayList.Add(Well_Id)
+				End If
+			Next
+		End If
+		
+	End If
+	set getAllWellsWithPadName = WellWithPadNameArrayList
+end function 
+
+' GET ALL THE WELLS FOR A PAD NAME 
+public function SearchForWellsWithPadName(padName)
+	Dim oSearchConditions : Set oSearchConditions = CreateObject("MFilesAPI.SearchConditions")
+	Dim oClassSearchCondition : Set oClassSearchCondition = GetSearchConditionForLookupByID(100, Well_Class_DefId)
+	oSearchConditions.Add -1, oClassSearchCondition
+	
+	Dim oSearchCondition : Set oSearchCondition = CreateObject("MFilesAPI.SearchCondition")
+	oSearchCondition.Expression.SetPropertyValueExpression PadName_DefId, MFParentChildBehaviorNone, Nothing
+	oSearchCondition.ConditionType = MFConditionTypeEqual 
+	oSearchCondition.TypedValue.SetValue MFDatatypeText, padName
+
+	'get only non deleted items
+	Dim NotDeletedCondition : Set NotDeletedCondition = CreateObject("MFilesAPI.SearchCondition")
+	NotDeletedCondition.Expression.SetStatusValueExpression MFStatusType.MFStatusTypeDeleted, Nothing
+	NotDeletedCondition.ConditionType = MFConditionTypeEqual
+	NotDeletedCondition.TypedValue.SetValue MFDatatypeBoolean, false	
+	oSearchConditions.Add -1, NotDeletedCondition
+	
+	oSearchConditions.Add -1, oSearchCondition 
+	
+	Dim oSearchResults : set oSearchResults = Vault.ObjectSearchOperations.SearchForObjectsByConditions(oSearchConditions, 0, false)
+	Set SearchForWellsWithPadName = oSearchResults
+End Function
